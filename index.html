@@ -185,8 +185,8 @@
                       placeholder="¿Qué se observa? Ej: fisura y desprendimiento de pintura en la parte superior de la pared"></textarea>
           </div>
           <div class="campo">
-            <label for="in-reporta">Reportado por (opcional)</label>
-            <input id="in-reporta" type="text" maxlength="80" placeholder="Su nombre">
+            <label for="in-reporta">Reportado por (vecino que informa, opcional)</label>
+            <input id="in-reporta" type="text" maxlength="80" placeholder="Ej: Ana Gómez, apto 402">
           </div>
 
           <div class="campo">
@@ -281,7 +281,7 @@
   'use strict';
 
   const $ = id => document.getElementById(id);
-  const LS_CODIGO = 'hz_codigo_prueba', LS_NOMBRE = 'hz_nombre_prueba'; // sesiones separadas por ambiente
+  const LS_CODIGO = 'hz_codigo_prueba'; // sesiones separadas por ambiente
   const st = { codigo: '', datos: null, archivos: [], lista: [] };
 
   // ---------- utilidades ----------
@@ -401,8 +401,6 @@
     actualizarZonas();
     opciones($('sel-categoria'), d.categorias, 'Seleccione…');
     fechaHoy();
-    $('in-reporta').value = localStorage.getItem(LS_NOMBRE) || '';
-    $('in-reporta').closest('.campo').hidden = !!s.usuario;
 
     opciones($('c-libro'), libros);
     if (s.libro) $('c-libro').value = s.libro;
@@ -486,7 +484,6 @@
     if (!datos.descripcion) return toast('Escriba la descripción.', true);
     if (st.archivos.some(a => a.malo)) return toast('Quite los archivos marcados en rojo (solo fotos o videos).', true);
     if (!st.archivos.length && !confirm('¿Enviar el reporte sin fotos ni videos?')) return;
-    if (datos.reportadoPor) localStorage.setItem(LS_NOMBRE, datos.reportadoPor);
 
     const btn = $('btn-enviar'); btn.disabled = true;
     const archivos = st.archivos.slice();
@@ -551,7 +548,7 @@
   $('btn-otro').addEventListener('click', () => {
     st.archivos.forEach(a => a.url && URL.revokeObjectURL(a.url));
     st.archivos = []; pintarArchivos();
-    $('in-ubicacion').value = ''; $('in-descripcion').value = ''; $('sel-categoria').value = '';
+    $('in-ubicacion').value = ''; $('in-descripcion').value = ''; $('sel-categoria').value = ''; $('in-reporta').value = '';
     fechaHoy();
     $('resultado').hidden = true; $('res-manual').hidden = true; $('f-reporte').hidden = false;
   });
@@ -597,7 +594,8 @@
           title: h.registro ? 'Registrado en el sistema: ' + h.registro : '' }),
         h.ubicacion ? el('div', { class: 'meta', text: '📍 ' + h.ubicacion }) : null,
         el('div', { class: 'desc', text: h.descripcion }),
-        h.reportadoPor ? el('div', { class: 'meta', text: 'Reportó: ' + h.reportadoPor }) : null,
+        h.reportadoPor || h.cargadoPor ? el('div', { class: 'meta', text: [h.reportadoPor ? '🗣 Reportó: ' + h.reportadoPor : '',
+          h.cargadoPor ? '📤 Cargó: ' + h.cargadoPor : ''].filter(String).join(' · ') }) : null,
         h.obs ? el('div', { class: 'meta', text: '📝 ' + h.obs }) : null,
         galeria,
         (h.pendientes || []).length ? el('div', { class: 'pend', text: '⏳ Pendiente carga manual: ' + h.pendientes.join(', ') }) : null,
