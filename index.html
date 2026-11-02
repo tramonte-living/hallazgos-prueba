@@ -321,6 +321,21 @@
           <button id="a-recargar" class="btn btn-sec" type="button">Recargar configuración y resúmenes</button>
           <p id="a-fallos" class="ayuda"></p>
         </div>
+        <div class="tarjeta">
+          <h2>Renombrar categoría</h2>
+          <p class="ayuda">Cambia el nombre en las listas, en los hallazgos ya registrados de todos los libros y en el Resumen.</p>
+          <div class="fila2">
+            <div class="campo">
+              <label for="rc-anterior">Categoría actual</label>
+              <select id="rc-anterior"></select>
+            </div>
+            <div class="campo">
+              <label for="rc-nueva">Nombre nuevo</label>
+              <input id="rc-nueva" type="text" maxlength="60">
+            </div>
+          </div>
+          <button id="rc-guardar" class="btn" type="button">Renombrar</button>
+        </div>
         <div class="tarjeta peligro" id="a-reset-tarjeta" hidden>
           <h2>Reset (solo pruebas)</h2>
           <p class="ayuda">Borra todos los hallazgos de los 6 libros y envía las fotos y videos a la papelera de Drive
@@ -516,6 +531,8 @@
         (d.ajustes.fallosHora > 20 ? ' ⚠️ Muchos intentos: revise los usuarios bloqueados.' : '');
       opciones($('u-libro'), d.librosAdmin.map(l => ({ value: l.id, text: l.nombre })).concat([{ value: 'ADMIN', text: 'Administrador' }]));
       formUsuario(null);
+      opciones($('rc-anterior'), d.categorias);
+      $('rc-nueva').value = '';
       if (!s.debeCambiar) cargarUsuarios();
       const ul = $('a-enlaces'); ul.innerHTML = '';
       const link = (txt, url) => ul.appendChild(el('li', {}, [el('a', { href: url, target: '_blank', text: txt })]));
@@ -839,6 +856,21 @@
     caja.scrollIntoView({ behavior: 'smooth' });
   }
 
+  $('rc-guardar').addEventListener('click', async ev => {
+    const anterior = $('rc-anterior').value, nueva = $('rc-nueva').value.trim();
+    if (!nueva) return toast('Escriba el nombre nuevo.', true);
+    if (!confirm('¿Renombrar "' + anterior + '" a "' + nueva + '" en las listas, en todos los hallazgos y en los Resúmenes?')) return;
+    ev.target.disabled = true; toast('Renombrando… (puede tardar unos segundos)');
+    try {
+      const r = await api('api_renombrarCategoria', st.codigo, anterior, nueva);
+      st.datos.categorias = r.categorias;
+      opciones($('sel-categoria'), r.categorias, 'Seleccione…');
+      opciones($('rc-anterior'), r.categorias);
+      $('rc-nueva').value = '';
+      toast('Listo: "' + nueva + '". ' + r.hallazgos + ' hallazgo(s) actualizado(s).');
+    } catch (e) { toast(msgError(e), true); }
+    finally { ev.target.disabled = false; }
+  });
   $('a-reset').addEventListener('click', async ev => {
     const c = prompt('Esto borra TODOS los hallazgos y evidencias de prueba. Escriba BORRAR para confirmar:');
     if (c === null) return;
