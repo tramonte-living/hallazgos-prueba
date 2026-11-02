@@ -113,7 +113,13 @@
     .spinner { width: 34px; height: 34px; border: 4px solid #d5dee8; border-top-color: var(--azul); border-radius: 50%;
                margin: 10px auto; animation: giro 1s linear infinite; }
     @keyframes giro { to { transform: rotate(360deg); } }
-    .banner-prueba { background: #b54708; color: #fff; text-align: center; font-size: .8rem; font-weight: 600; padding: 4px; }
+    .usuarios-lista { list-style: none; padding: 0; margin: 0 0 12px; display: grid; gap: 8px; }
+  .usuarios-lista li { border: 1px solid var(--borde); border-radius: 10px; padding: 10px; }
+  .usuarios-lista .u-cab { display: flex; justify-content: space-between; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .usuarios-lista .u-acciones { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .clave-temporal { background: #eef6ff; border: 1px solid var(--azul2); border-radius: 10px; padding: 12px; margin: 10px 0; }
+  .clave-temporal code { font-size: 1.2rem; letter-spacing: 2px; background: #fff; padding: 2px 8px; border-radius: 6px; }
+  .banner-prueba { background: #b54708; color: #fff; text-align: center; font-size: .8rem; font-weight: 600; padding: 4px; }
   [hidden] { display: none !important; }
   </style>
 </head>
@@ -123,6 +129,7 @@
     <div class="marca">🏢 <b>Tramonte</b> · Hallazgos</div>
     <div id="usuario" class="usuario" hidden>
       <span id="usuario-txt"></span>
+      <button id="btn-clave" class="btn-link" type="button" title="Cambiar mi contraseña">🔑</button>
       <button id="btn-salir" class="btn-link" type="button">Salir</button>
     </div>
   </header>
@@ -134,16 +141,45 @@
       <p>Cargando…</p>
     </section>
 
-    <!-- Ingreso con código -->
+    <!-- Ingreso con usuario y contraseña -->
     <section id="v-ingreso" class="tarjeta" hidden>
       <h1>Ingresar</h1>
-      <p class="ayuda">Escriba el código de acceso de su torre.</p>
-      <form id="f-ingreso" autocomplete="off">
-        <input id="in-codigo" class="codigo" type="text" inputmode="text" maxlength="12"
-               placeholder="CÓDIGO" autocapitalize="characters" required>
+      <form id="f-ingreso">
+        <div class="campo">
+          <label for="in-usuario">Usuario</label>
+          <input id="in-usuario" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="30" required>
+        </div>
+        <div class="campo">
+          <label for="in-clave">Contraseña</label>
+          <input id="in-clave" type="password" autocomplete="current-password" maxlength="100" required>
+        </div>
         <button class="btn" type="submit">Ingresar</button>
       </form>
       <p id="ingreso-msg" class="error" hidden></p>
+      <p class="ayuda">¿Olvidó su contraseña? Pida al administrador que se la restablezca.</p>
+    </section>
+
+    <!-- Cambio de contraseña -->
+    <section id="v-clave" class="tarjeta" hidden>
+      <h1>Cambiar contraseña</h1>
+      <p id="clave-aviso" class="ayuda"></p>
+      <form id="f-clave">
+        <div class="campo">
+          <label for="cl-actual">Contraseña actual</label>
+          <input id="cl-actual" type="password" autocomplete="current-password" maxlength="100" required>
+        </div>
+        <div class="campo">
+          <label for="cl-nueva">Contraseña nueva (mínimo 8 caracteres)</label>
+          <input id="cl-nueva" type="password" autocomplete="new-password" minlength="8" maxlength="100" required>
+        </div>
+        <div class="campo">
+          <label for="cl-confirma">Repita la contraseña nueva</label>
+          <input id="cl-confirma" type="password" autocomplete="new-password" minlength="8" maxlength="100" required>
+        </div>
+        <button class="btn" type="submit">Guardar contraseña</button>
+        <button id="cl-cancelar" class="btn btn-sec" type="button" style="margin-top:8px">Cancelar</button>
+      </form>
+      <p id="clave-msg" class="error" hidden></p>
     </section>
 
     <!-- Aplicación -->
@@ -241,11 +277,32 @@
       <!-- Admin -->
       <div id="t-admin" class="panel" hidden>
         <div class="tarjeta">
+          <h2>Usuarios</h2>
+          <ul id="u-lista" class="usuarios-lista"></ul>
+          <div id="u-temporal" class="clave-temporal" hidden></div>
+          <h2 id="u-titulo">Nuevo usuario</h2>
+          <form id="f-usuario" autocomplete="off">
+            <div class="fila2">
+              <div class="campo">
+                <label for="u-usuario">Usuario</label>
+                <input id="u-usuario" type="text" maxlength="30" autocapitalize="none" spellcheck="false"
+                       placeholder="ej: jperez" required>
+              </div>
+              <div class="campo">
+                <label for="u-libro">Torre / rol</label>
+                <select id="u-libro" required></select>
+              </div>
+            </div>
+            <div class="campo">
+              <label for="u-nombre">Nombre (aparece en "Cargado por")</label>
+              <input id="u-nombre" type="text" maxlength="80" placeholder="ej: Juan Pérez" required>
+            </div>
+            <button id="u-guardar" class="btn" type="submit">Crear usuario</button>
+            <button id="u-cancelar" class="btn btn-sec" type="button" style="margin-top:8px" hidden>Cancelar edición</button>
+          </form>
+        </div>
+        <div class="tarjeta">
           <h2>Ajustes de acceso</h2>
-          <label class="switch">
-            <input type="checkbox" id="a-publico">
-            <span>Acceso con código de torre (link público)</span>
-          </label>
           <label class="switch">
             <input type="checkbox" id="a-cualquier">
             <span>Cualquier torre puede reportar en cualquier torre</span>
@@ -259,7 +316,7 @@
         <div class="tarjeta">
           <h2>Enlaces</h2>
           <ul id="a-enlaces" class="enlaces"></ul>
-          <p class="ayuda">Códigos, correos, categorías y zonas se editan en la hoja de Configuración.
+          <p class="ayuda">Categorías y zonas se editan en la hoja de Configuración.
             Los cambios se aplican solos; si no, use el botón.</p>
           <button id="a-recargar" class="btn btn-sec" type="button">Recargar configuración y resúmenes</button>
           <p id="a-fallos" class="ayuda"></p>
@@ -299,6 +356,7 @@
     try { d = await resp.json(); } catch (e) { throw new Error('El servidor no respondió correctamente (' + resp.status + '). Intente de nuevo.'); }
     if (!d.ok) {
       if (/^Sesión (vencida|no válida)/.test(d.error || '') && fn !== 'api_inicio') sesionVencida(d.error);
+      else if (/^Debe cambiar su contraseña/.test(d.error || '')) abrirCambioClave(true);
       throw new Error(d.error || 'Error desconocido');
     }
     return d.r;
@@ -321,7 +379,7 @@
   }
   function msgError(e) { return (e && e.message ? e.message : String(e)).replace(/^Exception:\s*/, ''); }
   function mb(bytes) { return (bytes / 1048576).toFixed(bytes < 1048576 ? 2 : 1) + ' MB'; }
-  function vista(id) { ['v-cargando', 'v-ingreso', 'v-app'].forEach(v => { $(v).hidden = v !== id; }); }
+  function vista(id) { ['v-cargando', 'v-ingreso', 'v-clave', 'v-app'].forEach(v => { $(v).hidden = v !== id; }); }
   function opciones(sel, items, conTodos) {
     sel.innerHTML = '';
     if (conTodos) sel.appendChild(el('option', { value: '', text: conTodos }));
@@ -342,45 +400,79 @@
   }
 
   // ---------- inicio / sesión ----------
-  async function iniciar(codigo) {
+  async function iniciar(token) {
     vista('v-cargando');
     try {
-      const d = await api('api_inicio', codigo || '');
-      if (d.necesitaCodigo) {
+      const d = await api('api_inicio', token || '');
+      if (d.necesitaIngreso) {
         localStorage.removeItem(LS_CODIGO);
         vista('v-ingreso');
-        if (d.mensaje) mostrarIngresoMsg(d.mensaje);
         return;
       }
-      st.codigo = d.sesion.token || '';
-      if (st.codigo) localStorage.setItem(LS_CODIGO, st.codigo); else localStorage.removeItem(LS_CODIGO);
-      st.datos = d;
-      montarApp();
-      vista('v-app');
+      entrar(d);
     } catch (e) {
       localStorage.removeItem(LS_CODIGO);
       vista('v-ingreso');
       mostrarIngresoMsg(msgError(e));
     }
   }
+  /** d: respuesta de api_inicio / api_ingresar / api_cambiarClave. */
+  function entrar(d) {
+    st.codigo = d.sesion.token;
+    localStorage.setItem(LS_CODIGO, st.codigo);
+    st.datos = d;
+    $('in-clave').value = '';
+    mostrarIngresoMsg('');
+    montarApp();
+    if (d.sesion.debeCambiar) abrirCambioClave(true);
+    else vista('v-app');
+  }
   function sesionVencida(msg) {
     localStorage.removeItem(LS_CODIGO);
     st.codigo = ''; st.datos = null;
-    $('usuario').hidden = true; $('in-codigo').value = '';
+    $('usuario').hidden = true; $('in-clave').value = '';
     vista('v-ingreso'); mostrarIngresoMsg(msg);
   }
   function mostrarIngresoMsg(m) { const p = $('ingreso-msg'); p.textContent = m; p.hidden = !m; }
 
-  $('f-ingreso').addEventListener('submit', ev => {
+  $('f-ingreso').addEventListener('submit', async ev => {
     ev.preventDefault();
-    const c = $('in-codigo').value.trim().toUpperCase();
-    if (c) iniciar(c);
+    const u = $('in-usuario').value.trim().toLowerCase(), c = $('in-clave').value;
+    if (!u || !c) return;
+    const btn = ev.target.querySelector('button'); btn.disabled = true; mostrarIngresoMsg('');
+    try { entrar(await api('api_ingresar', u, c)); }
+    catch (e) { mostrarIngresoMsg(msgError(e)); $('in-clave').value = ''; }
+    finally { btn.disabled = false; }
+  });
+
+  // ---------- cambio de contraseña ----------
+  function abrirCambioClave(obligatorio) {
+    st.claveObligatoria = obligatorio;
+    ['cl-actual', 'cl-nueva', 'cl-confirma'].forEach(id => { $(id).value = ''; });
+    $('clave-aviso').textContent = obligatorio
+      ? 'Por seguridad debe cambiar la contraseña temporal antes de continuar.' : 'Cambie su contraseña de acceso.';
+    $('cl-cancelar').hidden = obligatorio;
+    $('clave-msg').hidden = true;
+    vista('v-clave');
+  }
+  $('btn-clave').addEventListener('click', () => abrirCambioClave(false));
+  $('cl-cancelar').addEventListener('click', () => vista('v-app'));
+  $('f-clave').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const msg = t => { $('clave-msg').textContent = t; $('clave-msg').hidden = !t; };
+    const actual = $('cl-actual').value, nueva = $('cl-nueva').value;
+    if (nueva.length < 8) return msg('La contraseña nueva debe tener al menos 8 caracteres.');
+    if (nueva !== $('cl-confirma').value) return msg('Las contraseñas nuevas no coinciden.');
+    const btn = ev.target.querySelector('button[type=submit]'); btn.disabled = true; msg('');
+    try { entrar(await api('api_cambiarClave', st.codigo, actual, nueva)); toast('Contraseña actualizada'); }
+    catch (e) { msg(msgError(e)); }
+    finally { btn.disabled = false; }
   });
   $('btn-salir').addEventListener('click', () => {
     if (st.codigo) api('api_salir', st.codigo).catch(() => {});
     localStorage.removeItem(LS_CODIGO);
     st.codigo = ''; st.datos = null;
-    $('usuario').hidden = true; $('in-codigo').value = ''; mostrarIngresoMsg('');
+    $('usuario').hidden = true; $('in-clave').value = ''; mostrarIngresoMsg('');
     iniciar('');
   });
 
@@ -390,7 +482,6 @@
     const d = st.datos, s = d.sesion;
     $('usuario').hidden = false;
     $('usuario-txt').textContent = (s.usuario ? s.usuario + ' · ' : '') + (s.rol === 'ADMIN' ? 'Administrador' : nombreLibro(s.libro));
-    $('btn-salir').hidden = s.via !== 'código';
     $('tab-admin').hidden = s.rol !== 'ADMIN';
     $('limite-mb').textContent = d.limiteMB;
 
@@ -407,11 +498,13 @@
     actualizarZonasConsulta();
 
     if (d.ajustes) {
-      $('a-publico').checked = !!d.ajustes.accesoPublico;
       $('a-cualquier').checked = !!d.ajustes.cualquierTorre;
       $('a-limite').value = d.ajustes.limiteMB;
-      $('a-fallos').textContent = '🔒 Intentos de código incorrecto en la última hora: ' + (d.ajustes.fallosHora || 0) +
-        (d.ajustes.fallosHora > 20 ? ' ⚠️ Muchos intentos: considere cambiar los códigos.' : '');
+      $('a-fallos').textContent = '🔒 Intentos de ingreso fallidos en la última hora: ' + (d.ajustes.fallosHora || 0) +
+        (d.ajustes.fallosHora > 20 ? ' ⚠️ Muchos intentos: revise los usuarios bloqueados.' : '');
+      opciones($('u-libro'), d.librosAdmin.map(l => ({ value: l.id, text: l.nombre })).concat([{ value: 'ADMIN', text: 'Administrador' }]));
+      formUsuario(null);
+      if (!s.debeCambiar) cargarUsuarios();
       const ul = $('a-enlaces'); ul.innerHTML = '';
       const link = (txt, url) => ul.appendChild(el('li', {}, [el('a', { href: url, target: '_blank', text: txt })]));
       link('📁 Carpeta de datos (auditoría)', d.enlaces.datos);
@@ -645,12 +738,95 @@
   $('a-guardar').addEventListener('click', async () => {
     try {
       const aj = await api('api_guardarAjustes', st.codigo, {
-        accesoPublico: $('a-publico').checked, cualquierTorre: $('a-cualquier').checked, limiteMB: Number($('a-limite').value) || 50,
+        cualquierTorre: $('a-cualquier').checked, limiteMB: Number($('a-limite').value) || 50,
       });
       st.datos.ajustes = aj; st.datos.limiteMB = aj.limiteMB; $('limite-mb').textContent = aj.limiteMB;
       toast('Ajustes guardados');
     } catch (e) { toast(msgError(e), true); }
   });
+  // ---------- admin: usuarios ----------
+  async function cargarUsuarios() {
+    const ul = $('u-lista'); ul.innerHTML = '';
+    ul.appendChild(el('li', { class: 'ayuda', text: 'Cargando usuarios…' }));
+    try { pintarUsuarios(await api('api_usuarios', st.codigo)); }
+    catch (e) { ul.innerHTML = ''; toast(msgError(e), true); }
+  }
+  function nombreRol(l) { return l === 'ADMIN' ? 'Administrador' : nombreLibro(l); }
+  function pintarUsuarios(lista) {
+    const ul = $('u-lista'); ul.innerHTML = '';
+    const yo = st.datos.sesion.usuarioId;
+    lista.forEach(u => {
+      const accion = (txt, fn, sec) => el('button', { class: 'btn mini' + (sec ? ' btn-sec' : ''), type: 'button', text: txt, onclick: fn });
+      const acciones = [accion('✏️ Editar', () => formUsuario(u), true)];
+      if (u.usuario !== yo) {
+        acciones.push(accion('🔑 Restablecer contraseña', () => restablecer(u)));
+        acciones.push(accion(u.activo ? '⛔ Desactivar' : '✅ Activar', () => guardarUsuario(
+          { usuario: u.usuario, libro: u.libro, nombre: u.nombre, activo: !u.activo }, false), true));
+      }
+      if (u.bloqueado) acciones.push(accion('🔓 Desbloquear', async () => {
+        try { await api('api_desbloquear', st.codigo, u.usuario); toast(u.usuario + ' desbloqueado'); cargarUsuarios(); }
+        catch (e) { toast(msgError(e), true); }
+      }));
+      const marcas = [!u.activo ? ['Inactivo', 'mal'] : null, u.bloqueado ? ['Bloqueado', 'mal'] : null,
+        !u.tieneClave ? ['Sin contraseña', 'pend'] : u.debeCambiar ? ['Contraseña temporal', 'pend'] : null].filter(Boolean);
+      ul.appendChild(el('li', {}, [
+        el('div', { class: 'u-cab' }, [el('b', { text: u.usuario + (u.usuario === yo ? ' (usted)' : '') }),
+          el('span', {}, marcas.map(m => el('span', { class: 'badge ' + m[1], text: m[0] })))]),
+        el('div', { class: 'meta', text: nombreRol(u.libro) + ' · ' + (u.nombre || '—') +
+          (u.ultimo ? ' · último ingreso ' + u.ultimo : ' · nunca ha ingresado') }),
+        el('div', { class: 'u-acciones' }, acciones),
+      ]));
+    });
+  }
+  function formUsuario(u) {
+    st.editando = u ? u.usuario : null;
+    $('u-titulo').textContent = u ? 'Editar usuario ' + u.usuario : 'Nuevo usuario';
+    $('u-usuario').value = u ? u.usuario : ''; $('u-usuario').disabled = !!u;
+    $('u-nombre').value = u ? u.nombre : '';
+    $('u-libro').value = u ? u.libro : $('u-libro').options[0].value;
+    $('u-guardar').textContent = u ? 'Guardar cambios' : 'Crear usuario';
+    $('u-cancelar').hidden = !u;
+    if (u) $('f-usuario').scrollIntoView({ behavior: 'smooth' });
+  }
+  $('u-cancelar').addEventListener('click', () => formUsuario(null));
+  $('f-usuario').addEventListener('submit', ev => {
+    ev.preventDefault();
+    const nuevo = !st.editando;
+    const actual = nuevo ? null : st.editando;
+    guardarUsuario({ usuario: nuevo ? $('u-usuario').value.trim().toLowerCase() : actual,
+      libro: $('u-libro').value, nombre: $('u-nombre').value.trim(), activo: true }, nuevo);
+  });
+  async function guardarUsuario(d, nuevo) {
+    d.nuevo = nuevo;
+    try {
+      const r = await api('api_guardarUsuario', st.codigo, d);
+      if (r.claveTemporal) mostrarTemporal(r.usuario, r.claveTemporal, 'Usuario creado');
+      else toast('Usuario ' + r.usuario + ' actualizado');
+      formUsuario(null); cargarUsuarios();
+    } catch (e) { toast(msgError(e), true); }
+  }
+  async function restablecer(u) {
+    if (!confirm('¿Restablecer la contraseña de ' + u.usuario + '? Se cerrarán sus sesiones abiertas.')) return;
+    try { const r = await api('api_restablecerClave', st.codigo, u.usuario); mostrarTemporal(r.usuario, r.claveTemporal, 'Contraseña restablecida'); cargarUsuarios(); }
+    catch (e) { toast(msgError(e), true); }
+  }
+  function mostrarTemporal(usuario, clave, titulo) {
+    const caja = $('u-temporal'); caja.innerHTML = ''; caja.hidden = false;
+    const texto = 'Hallazgos Tramonte\n' + location.href.split('#')[0] + '\nUsuario: ' + usuario +
+      '\nContraseña temporal: ' + clave + '\nAl ingresar se le pedirá cambiarla.';
+    caja.appendChild(el('p', {}, [el('b', { text: '✅ ' + titulo + '. ' }),
+      'Esta contraseña temporal solo se muestra ahora; envíesela a la persona:']));
+    caja.appendChild(el('p', {}, ['Usuario: ', el('code', { text: usuario })]));
+    caja.appendChild(el('p', {}, ['Contraseña temporal: ', el('code', { text: clave })]));
+    caja.appendChild(el('button', { class: 'btn mini', type: 'button', text: '📋 Copiar mensaje', onclick: async () => {
+      try { await navigator.clipboard.writeText(texto); toast('Copiado. Péguelo en WhatsApp.'); }
+      catch (e) { prompt('Copie este texto:', texto); }
+    } }));
+    caja.appendChild(el('button', { class: 'btn mini btn-sec', type: 'button', text: 'Cerrar', style: 'margin-left:6px',
+      onclick: () => { caja.hidden = true; caja.innerHTML = ''; } }));
+    caja.scrollIntoView({ behavior: 'smooth' });
+  }
+
   $('a-reset').addEventListener('click', async ev => {
     const c = prompt('Esto borra TODOS los hallazgos y evidencias de prueba. Escriba BORRAR para confirmar:');
     if (c === null) return;
