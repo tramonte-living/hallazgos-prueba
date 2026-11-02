@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PRUEBA · Hallazgos Tramonte</title>
+  <style>
+    :root {
+      --azul: #1F4E78; --azul2: #2E75B6; --fondo: #F3F6F9; --borde: #D6DEE6; --texto: #1d2733;
+      --gris: #5f6b78; --ok: #1e7b45; --error: #b42318; --aviso: #b54708;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; background: var(--fondo);
+           color: var(--texto); font-size: 16px; line-height: 1.4; }
+    main { max-width: 720px; margin: 0 auto; padding: 12px; }
+    h1 { font-size: 1.3rem; margin: 0 0 6px; }
+    h2 { font-size: 1.05rem; margin: 0 0 12px; color: var(--azul); }
+  
+    .barra { position: sticky; top: 0; z-index: 5; background: var(--azul); color: #fff; display: flex;
+             justify-content: space-between; align-items: center; padding: 10px 14px; }
+    .marca { font-size: 1.05rem; }
+    .usuario { font-size: .85rem; display: flex; gap: 10px; align-items: center; }
+    .btn-link { background: none; border: 1px solid rgba(255,255,255,.6); color: #fff; border-radius: 6px;
+                padding: 3px 8px; font-size: .8rem; cursor: pointer; }
+  
+    .tarjeta { background: #fff; border: 1px solid var(--borde); border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+    .centro { text-align: center; }
+    .ayuda { color: var(--gris); font-size: .85rem; margin: 4px 0; }
+    .error { color: var(--error); font-size: .9rem; }
+  
+    .tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+    .tab { flex: 1; padding: 10px 6px; border: 1px solid var(--borde); background: #fff; border-radius: 10px;
+           font-size: .95rem; cursor: pointer; color: var(--texto); }
+    .tab.activa { background: var(--azul); color: #fff; border-color: var(--azul); }
+  
+    .campo { margin-bottom: 12px; }
+    .campo.corto { max-width: 200px; }
+    .campo label { display: block; font-weight: 600; font-size: .9rem; margin-bottom: 4px; }
+    .fila2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    @media (max-width: 480px) { .fila2 { grid-template-columns: 1fr; } }
+    input[type=text], input[type=search], input[type=number], input[type=date], select, textarea {
+      width: 100%; padding: 10px; border: 1px solid var(--borde); border-radius: 8px; font-size: 1rem;
+      background: #fff; color: var(--texto); font-family: inherit; }
+    textarea { resize: vertical; }
+    input:focus, select:focus, textarea:focus { outline: 2px solid var(--azul2); border-color: var(--azul2); }
+    .codigo { text-align: center; letter-spacing: 4px; font-size: 1.4rem !important; text-transform: uppercase;
+              margin-bottom: 10px; }
+  
+    .btn { display: inline-block; background: var(--azul); color: #fff; border: 0; border-radius: 8px; padding: 10px 16px;
+           font-size: 1rem; cursor: pointer; text-align: center; width: 100%; }
+    .btn:disabled { opacity: .55; cursor: default; }
+    .btn.grande { padding: 14px; font-size: 1.1rem; margin-top: 4px; }
+    .btn-sec { background: #fff; color: var(--azul); border: 2px dashed var(--azul2); }
+    .btn.mini { width: auto; padding: 6px 10px; font-size: .85rem; }
+  .btn-peligro { background: var(--error); }
+  .tarjeta.peligro { border-color: var(--error); }
+  .tarjeta.peligro h2 { color: var(--error); }
+  
+    .archivos { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 8px; }
+    .archivo { display: flex; align-items: center; gap: 10px; border: 1px solid var(--borde); border-radius: 8px; padding: 6px; }
+    .archivo.malo { border-color: var(--error); background: #fff4f2; }
+  .archivo.manual { border-color: var(--aviso); background: #fff8eb; }
+  .aviso-manual { text-align: left; background: #fff8eb; border: 1px solid var(--aviso); border-radius: 10px;
+                  padding: 12px; margin: 12px 0; font-size: .9rem; }
+  .aviso-manual b { color: var(--aviso); }
+  .aviso-manual code { background: #fff; border: 1px solid var(--borde); border-radius: 4px; padding: 1px 5px;
+                       font-size: .9rem; word-break: break-all; }
+  .aviso-manual ul { padding-left: 18px; margin: 6px 0; }
+  .hallazgo .pend { color: var(--aviso); font-size: .85rem; margin-top: 6px; }
+    .archivo .mini { width: 56px; height: 56px; object-fit: cover; border-radius: 6px; background: #e9eef3;
+                     display: flex; align-items: center; justify-content: center; font-size: 1.5rem; flex-shrink: 0; }
+    .archivo .info { flex: 1; min-width: 0; font-size: .85rem; }
+    .archivo .nombre { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .archivo .quitar { background: none; border: 0; font-size: 1.3rem; cursor: pointer; color: var(--gris); }
+    .archivo .estado-sub { font-size: .8rem; }
+  
+    .progreso { margin-top: 12px; }
+    .barra-prog { height: 10px; background: #e3e9ef; border-radius: 6px; overflow: hidden; }
+    #barra-prog-in { height: 100%; width: 0; background: var(--azul2); transition: width .3s; }
+  
+    .exito { text-align: center; }
+    .check { font-size: 2.5rem; }
+    .id-grande { font-size: 1.6rem; font-weight: 700; color: var(--azul); letter-spacing: 1px; margin: 6px 0; }
+  
+    .hallazgo { background: #fff; border: 1px solid var(--borde); border-radius: 12px; padding: 12px; margin-bottom: 10px; }
+    .hallazgo .cab { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .hallazgo .hid { font-weight: 700; color: var(--azul); }
+    .hallazgo .meta { color: var(--gris); font-size: .85rem; margin: 2px 0 6px; }
+    .hallazgo .desc { margin: 4px 0; white-space: pre-wrap; }
+    .badge { font-size: .75rem; padding: 3px 8px; border-radius: 20px; background: #eef2f6; color: var(--gris); white-space: nowrap; }
+    .badge.pend { background: #fff4e5; color: var(--aviso); }
+    .badge.ok { background: #e7f6ec; color: var(--ok); }
+    .badge.mal { background: #fdecea; color: var(--error); }
+    .galeria { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .galeria a, .galeria .ph { width: 84px; height: 84px; border-radius: 8px; background: #e9eef3; display: flex;
+                               align-items: center; justify-content: center; overflow: hidden; font-size: .7rem;
+                               color: var(--gris); text-decoration: none; position: relative; }
+    .galeria img { width: 100%; height: 100%; object-fit: cover; }
+    .galeria .play { position: absolute; font-size: 1.6rem; color: #fff; text-shadow: 0 0 6px #000; }
+    .revision { display: grid; grid-template-columns: 1fr auto; gap: 6px; margin-top: 10px; padding-top: 10px;
+                border-top: 1px dashed var(--borde); }
+    .revision input { grid-column: 1 / -1; }
+  
+    .switch { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; cursor: pointer; }
+    .switch input { width: 22px; height: 22px; }
+    .enlaces { padding-left: 18px; margin: 0 0 8px; }
+    .enlaces a { color: var(--azul2); }
+  
+    .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: #222; color: #fff;
+             padding: 10px 16px; border-radius: 8px; font-size: .9rem; z-index: 20; max-width: 90vw; }
+    .toast.error { background: var(--error); }
+    .spinner { width: 34px; height: 34px; border: 4px solid #d5dee8; border-top-color: var(--azul); border-radius: 50%;
+               margin: 10px auto; animation: giro 1s linear infinite; }
+    @keyframes giro { to { transform: rotate(360deg); } }
+    .banner-prueba { background: #b54708; color: #fff; text-align: center; font-size: .8rem; font-weight: 600; padding: 4px; }
+  [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <div id="banner-prueba" class="banner-prueba" hidden>🧪 AMBIENTE DE PRUEBA · los datos de aquí no son reales</div>
+  <header class="barra">
+    <div class="marca">🏢 <b>Tramonte</b> · Hallazgos</div>
+    <div id="usuario" class="usuario" hidden>
+      <span id="usuario-txt"></span>
+      <button id="btn-salir" class="btn-link" type="button">Salir</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- Cargando -->
+    <section id="v-cargando" class="tarjeta centro">
+      <div class="spinner"></div>
+      <p>Cargando…</p>
+    </section>
+
+    <!-- Ingreso con código -->
+    <section id="v-ingreso" class="tarjeta" hidden>
+      <h1>Ingresar</h1>
+      <p class="ayuda">Escriba el código de acceso de su torre.</p>
+      <form id="f-ingreso" autocomplete="off">
+        <input id="in-codigo" class="codigo" type="text" inputmode="text" maxlength="12"
+               placeholder="CÓDIGO" autocapitalize="characters" required>
+        <button class="btn" type="submit">Ingresar</button>
+      </form>
+      <p id="ingreso-msg" class="error" hidden></p>
+    </section>
+
+    <!-- Aplicación -->
+    <section id="v-app" hidden>
+      <nav class="tabs">
+        <button class="tab activa" data-tab="reportar" type="button">📷 Reportar</button>
+        <button class="tab" data-tab="consultar" type="button">📋 Consultar</button>
+        <button class="tab" data-tab="admin" type="button" hidden id="tab-admin">⚙️ Admin</button>
+      </nav>
+
+      <!-- Reportar -->
+      <div id="t-reportar" class="panel">
+        <form id="f-reporte" class="tarjeta" novalidate>
+          <div class="campo" id="campo-libro">
+            <label for="sel-libro">Torre / Libro</label>
+            <select id="sel-libro" required></select>
+          </div>
+          <div class="fila2">
+            <div class="campo">
+              <label for="sel-zona">Piso / Zona</label>
+              <select id="sel-zona" required></select>
+            </div>
+            <div class="campo">
+              <label for="sel-categoria">Categoría</label>
+              <select id="sel-categoria" required></select>
+            </div>
+          </div>
+          <div class="campo corto">
+            <label for="in-fecha">Fecha del reporte</label>
+            <input id="in-fecha" type="date" required>
+          </div>
+          <div class="campo">
+            <label for="in-ubicacion">Ubicación exacta / referencia</label>
+            <input id="in-ubicacion" type="text" maxlength="200" placeholder="Ej: pasillo frente al apto 403">
+          </div>
+          <div class="campo">
+            <label for="in-descripcion">Descripción del hallazgo *</label>
+            <textarea id="in-descripcion" rows="4" maxlength="2000" required
+                      placeholder="¿Qué se observa? Ej: fisura y desprendimiento de pintura en la parte superior de la pared"></textarea>
+          </div>
+          <div class="campo">
+            <label for="in-reporta">Reportado por (opcional)</label>
+            <input id="in-reporta" type="text" maxlength="80" placeholder="Su nombre">
+          </div>
+
+          <div class="campo">
+            <label>Fotos / videos</label>
+            <label class="btn btn-sec subir">
+              ➕ Agregar fotos o videos
+              <input id="in-archivos" type="file" accept="image/*,video/*" multiple hidden>
+            </label>
+            <p class="ayuda">Puede agregar varios. Los archivos de más de <span id="limite-mb">50</span> MB no se suben
+              por la página: al enviar se le indicará cómo entregarlos.</p>
+            <ul id="lista-archivos" class="archivos"></ul>
+          </div>
+
+          <button id="btn-enviar" class="btn grande" type="submit">Enviar reporte</button>
+          <div id="progreso" class="progreso" hidden>
+            <div class="barra-prog"><div id="barra-prog-in"></div></div>
+            <p id="progreso-txt"></p>
+          </div>
+        </form>
+
+        <div id="resultado" class="tarjeta exito" hidden>
+          <div class="check">✅</div>
+          <p>Hallazgo registrado</p>
+          <p class="id-grande" id="res-id"></p>
+          <p id="res-detalle" class="ayuda"></p>
+          <div id="res-manual" class="aviso-manual" hidden></div>
+          <button id="btn-otro" class="btn" type="button">Reportar otro</button>
+        </div>
+      </div>
+
+      <!-- Consultar -->
+      <div id="t-consultar" class="panel" hidden>
+        <div class="tarjeta filtros">
+          <div class="fila2">
+            <div class="campo">
+              <label for="c-libro">Libro</label>
+              <select id="c-libro"></select>
+            </div>
+            <div class="campo">
+              <label for="c-zona">Piso / Zona</label>
+              <select id="c-zona"></select>
+            </div>
+          </div>
+          <div class="campo">
+            <input id="c-buscar" type="search" placeholder="Buscar en ID, ubicación o descripción…">
+          </div>
+          <p id="c-total" class="ayuda"></p>
+        </div>
+        <div id="c-lista"></div>
+      </div>
+
+      <!-- Admin -->
+      <div id="t-admin" class="panel" hidden>
+        <div class="tarjeta">
+          <h2>Ajustes de acceso</h2>
+          <label class="switch">
+            <input type="checkbox" id="a-publico">
+            <span>Acceso con código de torre (link público)</span>
+          </label>
+          <label class="switch">
+            <input type="checkbox" id="a-cualquier">
+            <span>Cualquier torre puede reportar en cualquier torre</span>
+          </label>
+          <div class="campo corto">
+            <label for="a-limite">Límite por archivo (MB)</label>
+            <input id="a-limite" type="number" min="1" max="200">
+          </div>
+          <button id="a-guardar" class="btn" type="button">Guardar ajustes</button>
+        </div>
+        <div class="tarjeta">
+          <h2>Enlaces</h2>
+          <ul id="a-enlaces" class="enlaces"></ul>
+          <p class="ayuda">Códigos, correos, categorías y zonas se editan en la hoja de Configuración.
+            Los cambios se aplican solos; si no, use el botón.</p>
+          <button id="a-recargar" class="btn btn-sec" type="button">Recargar configuración y resúmenes</button>
+          <p id="a-fallos" class="ayuda"></p>
+        </div>
+        <div class="tarjeta peligro" id="a-reset-tarjeta" hidden>
+          <h2>Reset (solo pruebas)</h2>
+          <p class="ayuda">Borra todos los hallazgos de los 6 libros y envía las fotos y videos a la papelera de Drive
+            (se pueden recuperar durante 30 días). Los consecutivos vuelven a empezar en 001.
+            Los códigos, categorías y ajustes no se tocan.</p>
+          <button id="a-reset" class="btn btn-peligro" type="button">🗑 Borrar todo y empezar de nuevo</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" hidden></div>
+  <script>
+(function () {
+  'use strict';
+
+  const $ = id => document.getElementById(id);
+  const LS_CODIGO = 'hz_codigo_prueba', LS_NOMBRE = 'hz_nombre_prueba'; // sesiones separadas por ambiente
+  const st = { codigo: '', datos: null, archivos: [], lista: [] };
+
+  // ---------- utilidades ----------
+  // Motor (Apps Script). text/plain evita la verificación previa CORS; sin cookies, sin cuentas de Google.
+  const API_URL = 'https://script.google.com/macros/s/AKfycbxonnSoJLmaazla-p6yqDdr1AvRuJ9h2gdMniqX9-MesadREJWax7nSOeMt-x4Xx0zz/exec'; // publicar.py lo reemplaza según el ambiente
+  const ES_PRUEBA = true;
+  async function api(fn) {
+    const args = Array.prototype.slice.call(arguments, 1);
+    let resp;
+    try {
+      resp = await fetch(API_URL, { method: 'POST', credentials: 'omit', redirect: 'follow',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ fn: fn, args: args }) });
+    } catch (e) { throw new Error('Sin conexión con el servidor. Revise su internet e intente de nuevo.'); }
+    let d;
+    try { d = await resp.json(); } catch (e) { throw new Error('El servidor no respondió correctamente (' + resp.status + '). Intente de nuevo.'); }
+    if (!d.ok) {
+      if (/^Sesión (vencida|no válida)/.test(d.error || '') && fn !== 'api_inicio') sesionVencida(d.error);
+      throw new Error(d.error || 'Error desconocido');
+    }
+    return d.r;
+  }
+  function el(tag, props, hijos) {
+    const e = document.createElement(tag);
+    Object.keys(props || {}).forEach(k => {
+      if (k === 'class') e.className = props[k];
+      else if (k === 'text') e.textContent = props[k];
+      else if (k.indexOf('on') === 0) e.addEventListener(k.slice(2), props[k]);
+      else e.setAttribute(k, props[k]);
+    });
+    (hijos || []).forEach(h => h != null && e.appendChild(typeof h === 'string' ? document.createTextNode(h) : h));
+    return e;
+  }
+  function toast(msg, esError) {
+    const t = $('toast');
+    t.textContent = msg; t.className = 'toast' + (esError ? ' error' : ''); t.hidden = false;
+    clearTimeout(toast._t); toast._t = setTimeout(() => { t.hidden = true; }, esError ? 6000 : 3000);
+  }
+  function msgError(e) { return (e && e.message ? e.message : String(e)).replace(/^Exception:\s*/, ''); }
+  function mb(bytes) { return (bytes / 1048576).toFixed(bytes < 1048576 ? 2 : 1) + ' MB'; }
+  function vista(id) { ['v-cargando', 'v-ingreso', 'v-app'].forEach(v => { $(v).hidden = v !== id; }); }
+  function opciones(sel, items, conTodos) {
+    sel.innerHTML = '';
+    if (conTodos) sel.appendChild(el('option', { value: '', text: conTodos }));
+    items.forEach(it => sel.appendChild(el('option', { value: it.value != null ? it.value : it, text: it.text || it })));
+  }
+  function hoyISO() {
+    const d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+  function fechaHoy() { const f = $('in-fecha'); f.max = hoyISO(); f.value = hoyISO(); }
+  function leerBase64(file) {
+    return new Promise((ok, mal) => {
+      const r = new FileReader();
+      r.onload = () => ok(String(r.result).split(',')[1] || '');
+      r.onerror = () => mal(r.error);
+      r.readAsDataURL(file);
+    });
+  }
+
+  // ---------- inicio / sesión ----------
+  async function iniciar(codigo) {
+    vista('v-cargando');
+    try {
+      const d = await api('api_inicio', codigo || '');
+      if (d.necesitaCodigo) {
+        localStorage.removeItem(LS_CODIGO);
+        vista('v-ingreso');
+        if (d.mensaje) mostrarIngresoMsg(d.mensaje);
+        return;
+      }
+      st.codigo = d.sesion.token || '';
+      if (st.codigo) localStorage.setItem(LS_CODIGO, st.codigo); else localStorage.removeItem(LS_CODIGO);
+      st.datos = d;
+      montarApp();
+      vista('v-app');
+    } catch (e) {
+      localStorage.removeItem(LS_CODIGO);
+      vista('v-ingreso');
+      mostrarIngresoMsg(msgError(e));
+    }
+  }
+  function sesionVencida(msg) {
+    localStorage.removeItem(LS_CODIGO);
+    st.codigo = ''; st.datos = null;
+    $('usuario').hidden = true; $('in-codigo').value = '';
+    vista('v-ingreso'); mostrarIngresoMsg(msg);
+  }
+  function mostrarIngresoMsg(m) { const p = $('ingreso-msg'); p.textContent = m; p.hidden = !m; }
+
+  $('f-ingreso').addEventListener('submit', ev => {
+    ev.preventDefault();
+    const c = $('in-codigo').value.trim().toUpperCase();
+    if (c) iniciar(c);
+  });
+  $('btn-salir').addEventListener('click', () => {
+    if (st.codigo) api('api_salir', st.codigo).catch(() => {});
+    localStorage.removeItem(LS_CODIGO);
+    st.codigo = ''; st.datos = null;
+    $('usuario').hidden = true; $('in-codigo').value = ''; mostrarIngresoMsg('');
+    iniciar('');
+  });
+
+  function nombreLibro(id) { const l = st.datos.libros.find(x => x.id === id); return l ? l.nombre : id; }
+
+  function montarApp() {
+    const d = st.datos, s = d.sesion;
+    $('usuario').hidden = false;
+    $('usuario-txt').textContent = (s.usuario ? s.usuario + ' · ' : '') + (s.rol === 'ADMIN' ? 'Administrador' : nombreLibro(s.libro));
+    $('btn-salir').hidden = s.via !== 'código';
+    $('tab-admin').hidden = s.rol !== 'ADMIN';
+    $('limite-mb').textContent = d.limiteMB;
+
+    const libros = d.libros.map(l => ({ value: l.id, text: l.nombre }));
+    opciones($('sel-libro'), libros);
+    if (s.libro) $('sel-libro').value = s.libro;
+    $('campo-libro').hidden = libros.length < 2;
+    actualizarZonas();
+    opciones($('sel-categoria'), d.categorias, 'Seleccione…');
+    fechaHoy();
+    $('in-reporta').value = localStorage.getItem(LS_NOMBRE) || '';
+    $('in-reporta').closest('.campo').hidden = !!s.usuario;
+
+    opciones($('c-libro'), libros);
+    if (s.libro) $('c-libro').value = s.libro;
+    actualizarZonasConsulta();
+
+    if (d.ajustes) {
+      $('a-publico').checked = !!d.ajustes.accesoPublico;
+      $('a-cualquier').checked = !!d.ajustes.cualquierTorre;
+      $('a-limite').value = d.ajustes.limiteMB;
+      $('a-fallos').textContent = '🔒 Intentos de código incorrecto en la última hora: ' + (d.ajustes.fallosHora || 0) +
+        (d.ajustes.fallosHora > 20 ? ' ⚠️ Muchos intentos: considere cambiar los códigos.' : '');
+      const ul = $('a-enlaces'); ul.innerHTML = '';
+      const link = (txt, url) => ul.appendChild(el('li', {}, [el('a', { href: url, target: '_blank', text: txt })]));
+      link('📁 Carpeta de datos (auditoría)', d.enlaces.datos);
+      link('🔐 Configuración (códigos, categorías, zonas)', d.enlaces.config);
+      d.enlaces.libros.forEach(l => link('📊 ' + l.nombre, l.url));
+      $('a-reset-tarjeta').hidden = !d.prueba;
+    }
+  }
+
+  // ---------- pestañas ----------
+  document.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(x => x.classList.toggle('activa', x === b));
+    ['reportar', 'consultar', 'admin'].forEach(t => { $('t-' + t).hidden = t !== b.dataset.tab; });
+    if (b.dataset.tab === 'consultar') cargarLista();
+  }));
+
+  // ---------- reportar ----------
+  function zonasDeLibro(id) { const l = st.datos.libros.find(x => x.id === id); return l ? l.zonas : []; }
+  function actualizarZonas() { opciones($('sel-zona'), zonasDeLibro($('sel-libro').value), 'Seleccione…'); }
+  $('sel-libro').addEventListener('change', actualizarZonas);
+
+  $('in-archivos').addEventListener('change', ev => {
+    Array.prototype.forEach.call(ev.target.files, f => st.archivos.push({ file: f, url: /^image\//.test(f.type) ? URL.createObjectURL(f) : null }));
+    ev.target.value = '';
+    pintarArchivos();
+  });
+
+  function pintarArchivos() {
+    const ul = $('lista-archivos'); ul.innerHTML = '';
+    const limite = st.datos.limiteMB * 1048576;
+    st.archivos.forEach((a, i) => {
+      const tipoOk = /^(image|video)\//.test(a.file.type);
+      a.malo = !tipoOk;
+      a.manual = tipoOk && a.file.size > limite;
+      const mini = a.url ? el('img', { class: 'mini', src: a.url, alt: '' }) : el('div', { class: 'mini', text: /^video/.test(a.file.type) ? '🎬' : '📄' });
+      const nota = !tipoOk ? 'Tipo no permitido' : a.estado ||
+        (a.manual ? mb(a.file.size) + ' · supera ' + st.datos.limiteMB + ' MB: se entregará manualmente' : mb(a.file.size));
+      ul.appendChild(el('li', { class: 'archivo' + (a.malo ? ' malo' : a.manual || a.fallo ? ' manual' : '') }, [
+        mini,
+        el('div', { class: 'info' }, [
+          el('div', { class: 'nombre', text: (i + 1) + '. ' + a.file.name }),
+          el('div', { class: 'estado-sub', text: nota }),
+        ]),
+        el('button', { class: 'quitar', type: 'button', title: 'Quitar', text: '✕', onclick: () => {
+          if (a.url) URL.revokeObjectURL(a.url);
+          st.archivos.splice(i, 1); pintarArchivos();
+        } }),
+      ]));
+    });
+  }
+
+  function progreso(pct, txt) {
+    $('progreso').hidden = false;
+    $('barra-prog-in').style.width = Math.round(pct) + '%';
+    $('progreso-txt').textContent = txt;
+  }
+
+  $('f-reporte').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const datos = {
+      libro: $('sel-libro').value, zona: $('sel-zona').value, categoria: $('sel-categoria').value,
+      fechaReporte: $('in-fecha').value,
+      ubicacion: $('in-ubicacion').value.trim(), descripcion: $('in-descripcion').value.trim(),
+      reportadoPor: $('in-reporta').value.trim(),
+    };
+    if (!datos.zona) return toast('Seleccione el piso / zona.', true);
+    if (!datos.fechaReporte) return toast('Indique la fecha del reporte.', true);
+    if (datos.fechaReporte > hoyISO()) return toast('La fecha del reporte no puede ser futura.', true);
+    if (!datos.categoria) return toast('Seleccione la categoría.', true);
+    if (!datos.descripcion) return toast('Escriba la descripción.', true);
+    if (st.archivos.some(a => a.malo)) return toast('Quite los archivos marcados en rojo (solo fotos o videos).', true);
+    if (!st.archivos.length && !confirm('¿Enviar el reporte sin fotos ni videos?')) return;
+    if (datos.reportadoPor) localStorage.setItem(LS_NOMBRE, datos.reportadoPor);
+
+    const btn = $('btn-enviar'); btn.disabled = true;
+    const archivos = st.archivos.slice();
+    datos.nArchivos = archivos.length;
+    const subidos = [], pendientes = []; let id = null;
+    try {
+      progreso(3, 'Registrando hallazgo…');
+      const r = await api('api_crearHallazgo', st.codigo, datos);
+      id = r.id; const ticket = r.ticket;
+      for (let i = 0; i < archivos.length; i++) {
+        const a = archivos[i];
+        const pendiente = () => pendientes.push({ indice: i + 1, original: a.file.name, mime: a.file.type });
+        if (a.manual) { pendiente(); a.estado = '⏳ Entrega manual (supera ' + st.datos.limiteMB + ' MB)'; pintarArchivos(); continue; }
+        const base = 5 + 90 * i / archivos.length;
+        progreso(base, 'Subiendo ' + (i + 1) + ' de ' + archivos.length + ' (' + mb(a.file.size) + ')…');
+        let ok = false;
+        for (let intento = 1; intento <= 2 && !ok; intento++) {
+          try {
+            const b64 = await leerBase64(a.file);
+            const res = await api('api_subirEvidencia', st.codigo, id, ticket, i + 1, a.file.name, a.file.type, b64);
+            subidos.push(res); ok = true; a.estado = '✓ ' + res.nombre;
+          } catch (e) {
+            if (intento === 2) { pendiente(); a.fallo = true; a.estado = '✗ No se pudo subir: ' + msgError(e); }
+          }
+        }
+        pintarArchivos();
+      }
+      progreso(97, 'Finalizando…');
+      const fin = await api('api_finalizarHallazgo', st.codigo, id, ticket, pendientes);
+      progreso(100, 'Listo');
+      $('res-id').textContent = id;
+      $('res-detalle').textContent = fin.evidencias + ' evidencia(s) guardada(s).';
+      mostrarManual(fin);
+      $('f-reporte').hidden = true; $('resultado').hidden = false;
+      window.scrollTo(0, 0);
+    } catch (e) {
+      toast((id ? 'Error en ' + id + ': ' : 'No se pudo registrar: ') + msgError(e), true);
+    } finally {
+      btn.disabled = false;
+      setTimeout(() => { $('progreso').hidden = true; }, 800);
+    }
+  });
+
+  function mostrarManual(fin) {
+    const caja = $('res-manual');
+    caja.innerHTML = ''; caja.hidden = !fin.pendientes.length;
+    if (!fin.pendientes.length) return;
+    const texto = 'Hallazgo ' + fin.id + ' – archivos para cargar manualmente\nCarpeta: ' + fin.ruta + '\n' +
+      fin.pendientes.map(p => '• ' + p.original + '  →  guardar como: ' + p.nombre).join('\n');
+    caja.appendChild(el('p', {}, [el('b', { text: '⚠️ ' + fin.pendientes.length + ' archivo(s) no se pudieron subir.' }),
+      ' El hallazgo quedó registrado como "Incompleto". Entregue estos archivos al administrador ' +
+      '(por WhatsApp o correo, con las instrucciones de abajo) o súbalos usted si tiene acceso a la carpeta:']));
+    caja.appendChild(el('p', {}, ['📁 Carpeta: ', el('code', { text: fin.ruta })]));
+    caja.appendChild(el('ul', {}, fin.pendientes.map(p =>
+      el('li', {}, [p.original + ' → guardar como ', el('code', { text: p.nombre })]))));
+    caja.appendChild(el('button', { class: 'btn mini', type: 'button', text: '📋 Copiar instrucciones', onclick: async () => {
+      try { await navigator.clipboard.writeText(texto); toast('Instrucciones copiadas. Péguelas en WhatsApp o correo.'); }
+      catch (e) { prompt('Copie este texto:', texto); }
+    } }));
+  }
+
+  $('btn-otro').addEventListener('click', () => {
+    st.archivos.forEach(a => a.url && URL.revokeObjectURL(a.url));
+    st.archivos = []; pintarArchivos();
+    $('in-ubicacion').value = ''; $('in-descripcion').value = ''; $('sel-categoria').value = '';
+    fechaHoy();
+    $('resultado').hidden = true; $('res-manual').hidden = true; $('f-reporte').hidden = false;
+  });
+
+  // ---------- consultar ----------
+  function actualizarZonasConsulta() { opciones($('c-zona'), zonasDeLibro($('c-libro').value), 'Todas'); }
+  $('c-libro').addEventListener('change', () => { actualizarZonasConsulta(); cargarLista(); });
+  $('c-zona').addEventListener('change', pintarLista);
+  $('c-buscar').addEventListener('input', pintarLista);
+
+  async function cargarLista() {
+    $('c-lista').innerHTML = ''; $('c-total').textContent = 'Cargando…';
+    try {
+      st.lista = await api('api_listar', st.codigo, $('c-libro').value);
+      pintarLista();
+    } catch (e) { $('c-total').textContent = ''; toast(msgError(e), true); }
+  }
+
+  function claseEstado(e) {
+    if (/Pendiente|Incompleto/.test(e)) return 'badge pend';
+    if (/Verificado|Enviado|Corregido|Cerrado/.test(e)) return 'badge ok';
+    if (/Duplicado|Anulado/.test(e)) return 'badge mal';
+    return 'badge';
+  }
+
+  function pintarLista() {
+    const zona = $('c-zona').value, q = $('c-buscar').value.trim().toLowerCase();
+    const libro = $('c-libro').value;
+    const items = st.lista.filter(h => (!zona || h.zona === zona) &&
+      (!q || [h.id, h.ubicacion, h.descripcion, h.categoria].join(' ').toLowerCase().indexOf(q) >= 0));
+    $('c-total').textContent = items.length + ' hallazgo(s)';
+    const cont = $('c-lista'); cont.innerHTML = '';
+    const admin = st.datos.sesion.rol === 'ADMIN';
+    items.forEach(h => {
+      const galeria = el('div', { class: 'galeria' });
+      if (h.evidencias.length) {
+        galeria.appendChild(el('button', { class: 'btn btn-sec mini', type: 'button', text: '🖼 Ver evidencias (' + h.evidencias.length + ')',
+          onclick: ev => { ev.target.remove(); cargarMiniaturas(galeria, libro, h.evidencias); } }));
+      }
+      const tarjeta = el('div', { class: 'hallazgo' }, [
+        el('div', { class: 'cab' }, [el('span', { class: 'hid', text: h.id }), el('span', { class: claseEstado(h.estado), text: h.estado })]),
+        el('div', { class: 'meta', text: h.zona + ' · ' + h.categoria + ' · 📅 ' + h.fecha,
+          title: h.registro ? 'Registrado en el sistema: ' + h.registro : '' }),
+        h.ubicacion ? el('div', { class: 'meta', text: '📍 ' + h.ubicacion }) : null,
+        el('div', { class: 'desc', text: h.descripcion }),
+        h.reportadoPor ? el('div', { class: 'meta', text: 'Reportó: ' + h.reportadoPor }) : null,
+        h.obs ? el('div', { class: 'meta', text: '📝 ' + h.obs }) : null,
+        galeria,
+        (h.pendientes || []).length ? el('div', { class: 'pend', text: '⏳ Pendiente carga manual: ' + h.pendientes.join(', ') }) : null,
+      ]);
+      if (admin) tarjeta.appendChild(controlRevision(h));
+      cont.appendChild(tarjeta);
+    });
+  }
+
+  async function cargarMiniaturas(galeria, libro, evidencias) {
+    for (const ev of evidencias) {
+      const ph = el('div', { class: 'ph', text: '…' });
+      galeria.appendChild(ph);
+      try {
+        const m = await api('api_miniatura', st.codigo, libro, ev.fileId);
+        const a = el('a', { href: m.url, target: '_blank', title: ev.nombre },
+          [m.data ? el('img', { src: m.data, alt: ev.nombre }) : el('span', { text: ev.nombre })]);
+        if (m.esVideo) a.appendChild(el('span', { class: 'play', text: '▶' }));
+        galeria.replaceChild(a, ph);
+      } catch (e) { ph.textContent = '⚠️'; ph.title = msgError(e); }
+    }
+  }
+
+  function controlRevision(h) {
+    const sel = el('select');
+    opciones(sel, st.datos.estados); sel.value = h.estado;
+    const obs = el('input', { type: 'text', placeholder: 'Observación de revisión (opcional)' });
+    obs.value = h.obs || '';
+    const btn = el('button', { class: 'btn mini', type: 'button', text: 'Guardar', onclick: async () => {
+      btn.disabled = true;
+      try { await api('api_cambiarEstado', st.codigo, h.id, sel.value, obs.value); h.estado = sel.value; h.obs = obs.value; toast(h.id + ' actualizado'); pintarLista(); }
+      catch (e) { toast(msgError(e), true); btn.disabled = false; }
+    } });
+    const re = el('button', { class: 'btn btn-sec mini', type: 'button', text: '🔄 Actualizar evidencias',
+      title: 'Vuelve a leer la carpeta (después de una carga manual)', onclick: async () => {
+        re.disabled = true;
+        try {
+          const r = await api('api_reescanearEvidencias', st.codigo, h.id);
+          toast(h.id + ': ' + r.evidencias + ' evidencia(s)' + (r.pendientes.length ? ', faltan ' + r.pendientes.length : ', completo'));
+          cargarLista();
+        } catch (e) { toast(msgError(e), true); re.disabled = false; }
+      } });
+    return el('div', { class: 'revision' }, [sel, btn, obs, re]);
+  }
+
+  // ---------- admin ----------
+  $('a-guardar').addEventListener('click', async () => {
+    try {
+      const aj = await api('api_guardarAjustes', st.codigo, {
+        accesoPublico: $('a-publico').checked, cualquierTorre: $('a-cualquier').checked, limiteMB: Number($('a-limite').value) || 50,
+      });
+      st.datos.ajustes = aj; st.datos.limiteMB = aj.limiteMB; $('limite-mb').textContent = aj.limiteMB;
+      toast('Ajustes guardados');
+    } catch (e) { toast(msgError(e), true); }
+  });
+  $('a-reset').addEventListener('click', async ev => {
+    const c = prompt('Esto borra TODOS los hallazgos y evidencias de prueba. Escriba BORRAR para confirmar:');
+    if (c === null) return;
+    if (c.trim().toUpperCase() !== 'BORRAR') return toast('No se borró nada (confirmación incorrecta).', true);
+    ev.target.disabled = true; toast('Borrando…');
+    try {
+      const r = await api('api_reset', st.codigo, 'BORRAR');
+      st.lista = [];
+      toast('Listo: ' + r.filas + ' hallazgo(s) y ' + r.archivos + ' archivo(s) eliminados.');
+    } catch (e) { toast(msgError(e), true); }
+    finally { ev.target.disabled = false; }
+  });
+  $('a-recargar').addEventListener('click', async ev => {
+    ev.target.disabled = true;
+    try { await api('api_recargarConfig', st.codigo); toast('Configuración recargada'); iniciar(st.codigo); }
+    catch (e) { toast(msgError(e), true); }
+    finally { ev.target.disabled = false; }
+  });
+
+  $('banner-prueba').hidden = !ES_PRUEBA;
+  iniciar(localStorage.getItem(LS_CODIGO) || '');
+})();
+</script>
+</body>
+</html>
