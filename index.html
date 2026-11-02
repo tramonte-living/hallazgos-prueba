@@ -476,6 +476,17 @@
     iniciar('');
   });
 
+  /** Al cambiar de usuario: vuelve a "Reportar" y borra todo lo que mostró la sesión anterior. */
+  function limpiarPantalla() {
+    document.querySelectorAll('.tab').forEach(x => x.classList.toggle('activa', x.dataset.tab === 'reportar'));
+    ['reportar', 'consultar', 'admin'].forEach(t => { $('t-' + t).hidden = t !== 'reportar'; });
+    ['c-lista', 'u-lista', 'a-enlaces', 'u-temporal', 'lista-archivos'].forEach(id => { $(id).innerHTML = ''; });
+    $('u-temporal').hidden = true; $('a-reset-tarjeta').hidden = true;
+    $('c-total').textContent = ''; $('c-buscar').value = '';
+    st.lista = []; st.archivos = [];
+    $('resultado').hidden = true; $('res-manual').hidden = true; $('f-reporte').hidden = false;
+    $('in-ubicacion').value = ''; $('in-descripcion').value = ''; $('in-reporta').value = '';
+  }
   function nombreLibro(id) { const l = st.datos.libros.find(x => x.id === id); return l ? l.nombre : id; }
 
   function montarApp() {
@@ -483,6 +494,7 @@
     $('usuario').hidden = false;
     $('usuario-txt').textContent = (s.usuario ? s.usuario + ' · ' : '') + (s.rol === 'ADMIN' ? 'Administrador' : nombreLibro(s.libro));
     $('tab-admin').hidden = s.rol !== 'ADMIN';
+    limpiarPantalla();
     $('limite-mb').textContent = d.limiteMB;
 
     const libros = d.libros.map(l => ({ value: l.id, text: l.nombre }));
