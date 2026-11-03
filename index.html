@@ -113,6 +113,9 @@
     .spinner { width: 34px; height: 34px; border: 4px solid #d5dee8; border-top-color: var(--azul); border-radius: 50%;
                margin: 10px auto; animation: giro 1s linear infinite; }
     @keyframes giro { to { transform: rotate(360deg); } }
+    .btn.ocupado:disabled { opacity: .85; cursor: progress; }
+    .giro-mini { display: inline-block; width: .9em; height: .9em; margin-right: 6px; vertical-align: -.12em;
+                 border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: giro .7s linear infinite; }
     .usuarios-lista { list-style: none; padding: 0; margin: 0 0 12px; display: grid; gap: 8px; }
   .usuarios-lista li { border: 1px solid var(--borde); border-radius: 10px; padding: 10px; }
   .usuarios-lista .u-cab { display: flex; justify-content: space-between; gap: 6px; flex-wrap: wrap; align-items: center; }
@@ -392,6 +395,18 @@
     t.textContent = msg; t.className = 'toast' + (esError ? ' error' : ''); t.hidden = false;
     clearTimeout(toast._t); toast._t = setTimeout(() => { t.hidden = true; }, esError ? 6000 : 3000);
   }
+  /**
+   * Mientras corre fn: desactiva el botón (evita doble clic) y muestra un indicador con el texto dado
+   * ("Creando…"); al terminar, con éxito o error, lo deja como estaba.
+   */
+  async function conEspera(btn, texto, fn) {
+    if (!btn || btn.disabled) return;
+    const antes = Array.from(btn.childNodes);
+    btn.disabled = true; btn.classList.add('ocupado');
+    btn.replaceChildren(el('span', { class: 'giro-mini' }), texto);
+    try { return await fn(); }
+    finally { btn.replaceChildren(...antes); btn.disabled = false; btn.classList.remove('ocupado'); }
+  }
   function msgError(e) { return (e && e.message ? e.message : String(e)).replace(/^Exception:\s*/, ''); }
   function mb(bytes) { return (bytes / 1048576).toFixed(bytes < 1048576 ? 2 : 1) + ' MB'; }
   function vista(id) { ['v-cargando', 'v-ingreso', 'v-clave', 'v-app'].forEach(v => { $(v).hidden = v !== id; }); }
@@ -454,10 +469,11 @@
     ev.preventDefault();
     const u = $('in-usuario').value.trim().toLowerCase(), c = $('in-clave').value;
     if (!u || !c) return;
-    const btn = ev.target.querySelector('button'); btn.disabled = true; mostrarIngresoMsg('');
-    try { entrar(await api('api_ingresar', u, c)); }
-    catch (e) { mostrarIngresoMsg(msgError(e)); $('in-clave').value = ''; }
-    finally { btn.disabled = false; }
+    mostrarIngresoMsg('');
+    await conEspera(ev.target.querySelector('button'), 'Ingresando…', async () => {
+      try { entrar(await api('api_ingresar', u, c)); }
+      catch (e) { mostrarIngresoMsg(msgError(e)); $('in-clave').value = ''; }
+    });
   });
 
   // ---------- cambio de contraseña ----------
@@ -478,10 +494,11 @@
     const actual = $('cl-actual').value, nueva = $('cl-nueva').value;
     if (nueva.length < 8) return msg('La contraseña nueva debe tener al menos 8 caracteres.');
     if (nueva !== $('cl-confirma').value) return msg('Las contraseñas nuevas no coinciden.');
-    const btn = ev.target.querySelector('button[type=submit]'); btn.disabled = true; msg('');
-    try { entrar(await api('api_cambiarClave', st.codigo, actual, nueva)); toast('Contraseña actualizada'); }
-    catch (e) { msg(msgError(e)); }
-    finally { btn.disabled = false; }
+    msg('');
+    await conEspera(ev.target.querySelector('button[type=submit]'), 'Guardando…', async () => {
+      try { entrar(await api('api_cambiarClave', st.codigo, actual, nueva)); toast('Contraseña actualizada'); }
+      catch (e) { msg(msgError(e)); }
+    });
   });
   $('btn-salir').addEventListener('click', () => {
     if (st.codigo) api('api_salir', st.codigo).catch(() => {});
@@ -746,25 +763,23 @@
     opciones(sel, st.datos.estados); sel.value = h.estado;
     const obs = el('input', { type: 'text', placeholder: 'Observación de revisión (opcional)' });
     obs.value = h.obs || '';
-    const btn = el('button', { class: 'btn mini', type: 'button', text: 'Guardar', onclick: async () => {
-      btn.disabled = true;
+    const btn = el('button', { class: 'btn mini', type: 'button', text: 'Guardar', onclick: () => conEspera(btn, 'Guardando…', async () => {
       try { await api('api_cambiarEstado', st.codigo, h.id, sel.value, obs.value); h.estado = sel.value; h.obs = obs.value; toast(h.id + ' actualizado'); pintarLista(); }
-      catch (e) { toast(msgError(e), true); btn.disabled = false; }
-    } });
+      catch (e) { toast(msgError(e), true); }
+    }) });
     const re = el('button', { class: 'btn btn-sec mini', type: 'button', text: '🔄 Actualizar evidencias',
-      title: 'Vuelve a leer la carpeta (después de una carga manual)', onclick: async () => {
-        re.disabled = true;
+      title: 'Vuelve a leer la carpeta (después de una carga manual)', onclick: () => conEspera(re, 'Actualizando…', async () => {
         try {
           const r = await api('api_reescanearEvidencias', st.codigo, h.id);
           toast(h.id + ': ' + r.evidencias + ' evidencia(s)' + (r.pendientes.length ? ', faltan ' + r.pendientes.length : ', completo'));
           cargarLista();
-        } catch (e) { toast(msgError(e), true); re.disabled = false; }
-      } });
+        } catch (e) { toast(msgError(e), true); }
+      }) });
     return el('div', { class: 'revision' }, [sel, btn, obs, re]);
   }
 
   // ---------- admin ----------
-  $('a-guardar').addEventListener('click', async () => {
+  $('a-guardar').addEventListener('click', ev => conEspera(ev.currentTarget, 'Guardando…', async () => {
     try {
       const aj = await api('api_guardarAjustes', st.codigo, {
         cualquierTorre: $('a-cualquier').checked, limiteMB: Number($('a-limite').value) || 50,
@@ -772,7 +787,7 @@
       st.datos.ajustes = aj; st.datos.limiteMB = aj.limiteMB; $('limite-mb').textContent = aj.limiteMB;
       toast('Ajustes guardados');
     } catch (e) { toast(msgError(e), true); }
-  });
+  }));
   // ---------- admin: usuarios ----------
   async function cargarUsuarios() {
     const ul = $('u-lista'); ul.innerHTML = '';
@@ -786,13 +801,15 @@
     const yo = st.datos.sesion.usuarioId;
     lista.forEach(u => {
       const accion = (txt, fn, sec) => el('button', { class: 'btn mini' + (sec ? ' btn-sec' : ''), type: 'button', text: txt, onclick: fn });
+      // Acciones que llaman al servidor: indicador en el propio botón mientras responde.
+      const accionEspera = (txt, espera, fn, sec) => { const b = accion(txt, () => conEspera(b, espera, fn), sec); return b; };
       const acciones = [accion('✏️ Editar', () => formUsuario(u), true)];
       if (u.usuario !== yo) {
-        acciones.push(accion('🔑 Restablecer contraseña', () => restablecer(u)));
-        acciones.push(accion(u.activo ? '⛔ Desactivar' : '✅ Activar', () => guardarUsuario(
+        acciones.push(accionEspera('🔑 Restablecer contraseña', 'Restableciendo…', () => restablecer(u)));
+        acciones.push(accionEspera(u.activo ? '⛔ Desactivar' : '✅ Activar', u.activo ? 'Desactivando…' : 'Activando…', () => guardarUsuario(
           { usuario: u.usuario, libro: u.libro, nombre: u.nombre, activo: !u.activo }, false), true));
       }
-      if (u.bloqueado) acciones.push(accion('🔓 Desbloquear', async () => {
+      if (u.bloqueado) acciones.push(accionEspera('🔓 Desbloquear', 'Desbloqueando…', async () => {
         try { await api('api_desbloquear', st.codigo, u.usuario); toast(u.usuario + ' desbloqueado'); cargarUsuarios(); }
         catch (e) { toast(msgError(e), true); }
       }));
@@ -822,8 +839,9 @@
     ev.preventDefault();
     const nuevo = !st.editando;
     const actual = nuevo ? null : st.editando;
-    guardarUsuario({ usuario: nuevo ? $('u-usuario').value.trim().toLowerCase() : actual,
-      libro: $('u-libro').value, nombre: $('u-nombre').value.trim(), activo: true }, nuevo);
+    conEspera($('u-guardar'), nuevo ? 'Creando usuario…' : 'Guardando…', () => guardarUsuario({
+      usuario: nuevo ? $('u-usuario').value.trim().toLowerCase() : actual,
+      libro: $('u-libro').value, nombre: $('u-nombre').value.trim(), activo: true }, nuevo));
   });
   async function guardarUsuario(d, nuevo) {
     d.nuevo = nuevo;
@@ -831,12 +849,12 @@
       const r = await api('api_guardarUsuario', st.codigo, d);
       if (r.claveTemporal) mostrarTemporal(r.usuario, r.claveTemporal, 'Usuario creado');
       else toast('Usuario ' + r.usuario + ' actualizado');
-      formUsuario(null); cargarUsuarios();
+      formUsuario(null); await cargarUsuarios();
     } catch (e) { toast(msgError(e), true); }
   }
   async function restablecer(u) {
     if (!confirm('¿Restablecer la contraseña de ' + u.usuario + '? Se cerrarán sus sesiones abiertas.')) return;
-    try { const r = await api('api_restablecerClave', st.codigo, u.usuario); mostrarTemporal(r.usuario, r.claveTemporal, 'Contraseña restablecida'); cargarUsuarios(); }
+    try { const r = await api('api_restablecerClave', st.codigo, u.usuario); mostrarTemporal(r.usuario, r.claveTemporal, 'Contraseña restablecida'); await cargarUsuarios(); }
     catch (e) { toast(msgError(e), true); }
   }
   function mostrarTemporal(usuario, clave, titulo) {
@@ -860,35 +878,33 @@
     const anterior = $('rc-anterior').value, nueva = $('rc-nueva').value.trim();
     if (!nueva) return toast('Escriba el nombre nuevo.', true);
     if (!confirm('¿Renombrar "' + anterior + '" a "' + nueva + '" en las listas, en todos los hallazgos y en los Resúmenes?')) return;
-    ev.target.disabled = true; toast('Renombrando… (puede tardar unos segundos)');
-    try {
-      const r = await api('api_renombrarCategoria', st.codigo, anterior, nueva);
-      st.datos.categorias = r.categorias;
-      opciones($('sel-categoria'), r.categorias, 'Seleccione…');
-      opciones($('rc-anterior'), r.categorias);
-      $('rc-nueva').value = '';
-      toast('Listo: "' + nueva + '". ' + r.hallazgos + ' hallazgo(s) actualizado(s).');
-    } catch (e) { toast(msgError(e), true); }
-    finally { ev.target.disabled = false; }
+    await conEspera(ev.currentTarget, 'Renombrando… (puede tardar)', async () => {
+      try {
+        const r = await api('api_renombrarCategoria', st.codigo, anterior, nueva);
+        st.datos.categorias = r.categorias;
+        opciones($('sel-categoria'), r.categorias, 'Seleccione…');
+        opciones($('rc-anterior'), r.categorias);
+        $('rc-nueva').value = '';
+        toast('Listo: "' + nueva + '". ' + r.hallazgos + ' hallazgo(s) actualizado(s).');
+      } catch (e) { toast(msgError(e), true); }
+    });
   });
   $('a-reset').addEventListener('click', async ev => {
     const c = prompt('Esto borra TODOS los hallazgos y evidencias de prueba. Escriba BORRAR para confirmar:');
     if (c === null) return;
     if (c.trim().toUpperCase() !== 'BORRAR') return toast('No se borró nada (confirmación incorrecta).', true);
-    ev.target.disabled = true; toast('Borrando…');
-    try {
-      const r = await api('api_reset', st.codigo, 'BORRAR');
-      st.lista = [];
-      toast('Listo: ' + r.filas + ' hallazgo(s) y ' + r.archivos + ' archivo(s) eliminados.');
-    } catch (e) { toast(msgError(e), true); }
-    finally { ev.target.disabled = false; }
+    await conEspera(ev.currentTarget, 'Borrando…', async () => {
+      try {
+        const r = await api('api_reset', st.codigo, 'BORRAR');
+        st.lista = [];
+        toast('Listo: ' + r.filas + ' hallazgo(s) y ' + r.archivos + ' archivo(s) eliminados.');
+      } catch (e) { toast(msgError(e), true); }
+    });
   });
-  $('a-recargar').addEventListener('click', async ev => {
-    ev.target.disabled = true;
+  $('a-recargar').addEventListener('click', ev => conEspera(ev.currentTarget, 'Recargando…', async () => {
     try { await api('api_recargarConfig', st.codigo); toast('Configuración recargada'); iniciar(st.codigo); }
     catch (e) { toast(msgError(e), true); }
-    finally { ev.target.disabled = false; }
-  });
+  }));
 
   $('banner-prueba').hidden = !ES_PRUEBA;
   iniciar(localStorage.getItem(LS_CODIGO) || '');
