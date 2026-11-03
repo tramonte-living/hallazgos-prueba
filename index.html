@@ -273,6 +273,7 @@
             <input id="c-buscar" type="search" placeholder="Buscar en ID, ubicación o descripción…">
           </div>
           <p id="c-total" class="ayuda"></p>
+          <ul id="c-enlaces" class="enlaces"></ul>
         </div>
         <div id="c-lista"></div>
       </div>
@@ -512,7 +513,7 @@
   function limpiarPantalla() {
     document.querySelectorAll('.tab').forEach(x => x.classList.toggle('activa', x.dataset.tab === 'reportar'));
     ['reportar', 'consultar', 'admin'].forEach(t => { $('t-' + t).hidden = t !== 'reportar'; });
-    ['c-lista', 'u-lista', 'a-enlaces', 'u-temporal', 'lista-archivos'].forEach(id => { $(id).innerHTML = ''; });
+    ['c-lista', 'c-enlaces', 'u-lista', 'a-enlaces', 'u-temporal', 'lista-archivos'].forEach(id => { $(id).innerHTML = ''; });
     $('u-temporal').hidden = true; $('a-reset-tarjeta').hidden = true;
     $('c-total').textContent = ''; $('c-buscar').value = '';
     st.lista = []; st.archivos = [];
@@ -693,7 +694,18 @@
   });
 
   // ---------- consultar ----------
-  function actualizarZonasConsulta() { opciones($('c-zona'), zonasDeLibro($('c-libro').value), 'Todas'); }
+  function actualizarZonasConsulta() { opciones($('c-zona'), zonasDeLibro($('c-libro').value), 'Todas'); pintarEnlacesConsulta(); }
+  /** Carpeta de Drive y Excel de cada libro del usuario (su torre y ZC); con más de 2 libros, solo el elegido. */
+  function pintarEnlacesConsulta() {
+    const ul = $('c-enlaces'); ul.innerHTML = '';
+    const todos = (st.datos && st.datos.libros) || [];
+    const libros = todos.length > 2 ? todos.filter(l => l.id === $('c-libro').value) : todos;
+    libros.filter(l => l.carpetaUrl).forEach(l => ul.appendChild(el('li', {}, [
+      l.nombre + ': ',
+      el('a', { href: l.carpetaUrl, target: '_blank', rel: 'noopener', text: '📁 Carpeta y fotos' }), ' · ',
+      el('a', { href: l.excelUrl, target: '_blank', rel: 'noopener', text: '📊 Excel' }),
+    ])));
+  }
   $('c-libro').addEventListener('change', () => { actualizarZonasConsulta(); cargarLista(); });
   $('c-zona').addEventListener('change', pintarLista);
   $('c-buscar').addEventListener('input', pintarLista);
