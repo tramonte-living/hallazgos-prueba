@@ -327,6 +327,13 @@
           <button id="a-guardar" class="btn" type="button">Guardar ajustes</button>
         </div>
         <div class="tarjeta">
+          <h2>Control general</h2>
+          <p class="ayuda">Excel <b>Control_Evidencias_TramonteLiving</b>: resumen de las 5 torres y Zonas Comunes por estado y
+            por categoría. Se actualiza solo cada hora; use el botón para tenerlo al día ahora.</p>
+          <p id="ctl-info" class="ayuda"></p>
+          <button id="ctl-actualizar" class="btn" type="button">🔄 Actualizar control general</button>
+        </div>
+        <div class="tarjeta">
           <h2>Enlaces</h2>
           <ul id="a-enlaces" class="enlaces"></ul>
           <p class="ayuda">Categorías y zonas se editan en la hoja de Configuración.
@@ -522,7 +529,7 @@
   function limpiarPantalla() {
     document.querySelectorAll('.tab').forEach(x => x.classList.toggle('activa', x.dataset.tab === 'reportar'));
     ['reportar', 'consultar', 'admin'].forEach(t => { $('t-' + t).hidden = t !== 'reportar'; });
-    ['c-lista', 'c-enlaces', 'u-lista', 'a-enlaces', 'u-temporal', 'lista-archivos'].forEach(id => { $(id).innerHTML = ''; });
+    ['c-lista', 'c-enlaces', 'ctl-info', 'u-lista', 'a-enlaces', 'u-temporal', 'lista-archivos'].forEach(id => { $(id).innerHTML = ''; });
     $('u-temporal').hidden = true; $('a-reset-tarjeta').hidden = true;
     $('c-total').textContent = ''; $('c-buscar').value = '';
     st.lista = []; st.archivos = [];
@@ -567,7 +574,14 @@
       link('🔐 Configuración (códigos, categorías, zonas)', d.enlaces.config);
       d.enlaces.libros.forEach(l => link('📊 ' + l.nombre, l.url));
       $('a-reset-tarjeta').hidden = !d.prueba;
+      pintarControl(d.control);
     }
+  }
+  function pintarControl(c) {
+    const p = $('ctl-info'); p.innerHTML = '';
+    if (!c) { p.textContent = 'Aún no se ha generado. Púlselo una vez para crearlo y activar la actualización de cada hora.'; return; }
+    p.append('Última actualización: ' + c.actualizado + ' · ',
+      el('a', { href: c.url, target: '_blank', rel: 'noopener', text: '📊 Abrir Control_Evidencias_TramonteLiving' }));
   }
 
   // ---------- pestañas ----------
@@ -940,6 +954,10 @@
       } catch (e) { toast(msgError(e), true); }
     });
   });
+  $('ctl-actualizar').addEventListener('click', ev => conEspera(ev.currentTarget, 'Actualizando… (puede tardar)', async () => {
+    try { const c = await api('api_actualizarControl', st.codigo); st.datos.control = c; pintarControl(c); toast('Control general actualizado'); }
+    catch (e) { toast(msgError(e), true); }
+  }));
   $('a-recargar').addEventListener('click', ev => conEspera(ev.currentTarget, 'Recargando…', async () => {
     try { await api('api_recargarConfig', st.codigo); toast('Configuración recargada'); iniciar(st.codigo); }
     catch (e) { toast(msgError(e), true); }
