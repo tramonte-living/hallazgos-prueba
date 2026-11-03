@@ -106,6 +106,9 @@
     .switch input { width: 22px; height: 22px; }
     .enlaces { padding-left: 18px; margin: 0 0 8px; }
     .enlaces a { color: var(--azul2); }
+    #c-ver-todo { border-top: 1px solid #e3e9f0; margin-top: 8px; padding-top: 8px; }
+    #c-ver-todo .ver-todo-tit { margin: 0 0 4px; }
+    #c-ver-todo .ayuda { margin: 0; }
   
     .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: #222; color: #fff;
              padding: 10px 16px; border-radius: 8px; font-size: .9rem; z-index: 20; max-width: 90vw; }
@@ -273,7 +276,13 @@
             <input id="c-buscar" type="search" placeholder="Buscar en ID, ubicación o descripción…">
           </div>
           <p id="c-total" class="ayuda"></p>
-          <ul id="c-enlaces" class="enlaces"></ul>
+          <div id="c-ver-todo" hidden>
+            <p class="ver-todo-tit"><b>Ver todo el libro</b> <span class="ayuda">(solo lectura, no se puede modificar)</span></p>
+            <ul id="c-enlaces" class="enlaces"></ul>
+            <p class="ayuda">📊 <b>Excel:</b> todos los hallazgos con su estado, más un resumen por piso y categoría.<br>
+              📁 <b>Fotos y videos:</b> organizados en una carpeta por piso o zona. Cada archivo lleva el ID del hallazgo
+              (ej. <code>T4-P04-001_1.jpg</code>).</p>
+          </div>
         </div>
         <div id="c-lista"></div>
       </div>
@@ -700,11 +709,13 @@
     const ul = $('c-enlaces'); ul.innerHTML = '';
     const todos = (st.datos && st.datos.libros) || [];
     const libros = todos.length > 2 ? todos.filter(l => l.id === $('c-libro').value) : todos;
-    libros.filter(l => l.carpetaUrl).forEach(l => ul.appendChild(el('li', {}, [
-      l.nombre + ': ',
-      el('a', { href: l.carpetaUrl, target: '_blank', rel: 'noopener', text: '📁 Carpeta y fotos' }), ' · ',
-      el('a', { href: l.excelUrl, target: '_blank', rel: 'noopener', text: '📊 Excel' }),
+    const conEnlace = libros.filter(l => l.carpetaUrl);
+    conEnlace.forEach(l => ul.appendChild(el('li', {}, [
+      el('b', { text: l.nombre + ':' }), ' ',
+      el('a', { href: l.excelUrl, target: '_blank', rel: 'noopener', text: '📊 Excel' }), ' · ',
+      el('a', { href: l.carpetaUrl, target: '_blank', rel: 'noopener', text: '📁 Fotos y videos' }),
     ])));
+    $('c-ver-todo').hidden = !conEnlace.length;
   }
   // Se cargan solo los más recientes; piso y búsqueda se filtran en el servidor sobre todo el libro.
   const LISTA_INICIAL = 5, LISTA_MAS = 10;
