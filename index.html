@@ -706,16 +706,27 @@
       el('a', { href: l.excelUrl, target: '_blank', rel: 'noopener', text: '📊 Excel' }),
     ])));
   }
+  // Se cargan solo los más recientes; piso y búsqueda se filtran en el servidor sobre todo el libro.
+  const LISTA_INICIAL = 5, LISTA_MAS = 10;
   $('c-libro').addEventListener('change', () => { actualizarZonasConsulta(); cargarLista(); });
-  $('c-zona').addEventListener('change', pintarLista);
-  $('c-buscar').addEventListener('input', pintarLista);
+  $('c-zona').addEventListener('change', () => cargarLista());
+  $('c-buscar').addEventListener('input', () => {
+    clearTimeout(cargarLista._t); cargarLista._t = setTimeout(() => cargarLista(), 600);
+  });
 
-  async function cargarLista() {
-    $('c-lista').innerHTML = ''; $('c-total').textContent = 'Cargando…';
+  /** mas = true: amplía la lista actual ("Ver más"); si no, vuelve a los últimos LISTA_INICIAL. */
+  async function cargarLista(mas) {
+    st.limite = mas ? (st.limite || LISTA_INICIAL) + LISTA_MAS : LISTA_INICIAL;
+    const pedido = cargarLista._n = (cargarLista._n || 0) + 1; // descarta respuestas viejas
+    if (!mas) $('c-lista').innerHTML = '';
+    $('c-total').textContent = 'Cargando…';
     try {
-      st.lista = await api('api_listar', st.codigo, $('c-libro').value);
+      const r = await api('api_listar', st.codigo, $('c-libro').value,
+        { limite: st.limite, zona: $('c-zona').value, q: $('c-buscar').value.trim() });
+      if (pedido !== cargarLista._n) return;
+      st.lista = r.items; st.totalLista = r.total;
       pintarLista();
-    } catch (e) { $('c-total').textContent = ''; toast(msgError(e), true); }
+    } catch (e) { if (pedido === cargarLista._n) { $('c-total').textContent = ''; toast(msgError(e), true); } }
   }
 
   function claseEstado(e) {
@@ -726,11 +737,11 @@
   }
 
   function pintarLista() {
-    const zona = $('c-zona').value, q = $('c-buscar').value.trim().toLowerCase();
-    const libro = $('c-libro').value;
-    const items = st.lista.filter(h => (!zona || h.zona === zona) &&
-      (!q || [h.id, h.ubicacion, h.descripcion, h.categoria].join(' ').toLowerCase().indexOf(q) >= 0));
-    $('c-total').textContent = items.length + ' hallazgo(s)';
+    const libro = $('c-libro').value, items = st.lista, total = st.totalLista || 0;
+    const filtro = $('c-zona').value || $('c-buscar').value.trim();
+    $('c-total').textContent = !total ? (filtro ? 'Ningún hallazgo coincide.' : 'Aún no hay hallazgos en este libro.')
+      : (items.length < total ? 'Mostrando los ' + items.length + ' más recientes de ' : 'Mostrando ') +
+        total + (filtro ? ' coincidencia(s).' : ' hallazgo(s).');
     const cont = $('c-lista'); cont.innerHTML = '';
     const admin = st.datos.sesion.rol === 'ADMIN';
     items.forEach(h => {
@@ -754,6 +765,11 @@
       if (admin) tarjeta.appendChild(controlRevision(h));
       cont.appendChild(tarjeta);
     });
+    if (items.length < total) {
+      const mas = el('button', { class: 'btn btn-sec', type: 'button', text: 'Ver ' + Math.min(LISTA_MAS, total - items.length) + ' más',
+        onclick: () => conEspera(mas, 'Cargando…', () => cargarLista(true)) });
+      cont.appendChild(mas);
+    }
   }
 
   async function cargarMiniaturas(galeria, libro, evidencias) {
