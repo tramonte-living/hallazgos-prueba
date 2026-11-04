@@ -119,10 +119,23 @@
     .btn.ocupado:disabled { opacity: .85; cursor: progress; }
     .giro-mini { display: inline-block; width: .9em; height: .9em; margin-right: 6px; vertical-align: -.12em;
                  border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: giro .7s linear infinite; }
-    .usuarios-lista { list-style: none; padding: 0; margin: 0 0 12px; display: grid; gap: 8px; }
-  .usuarios-lista li { border: 1px solid var(--borde); border-radius: 10px; padding: 10px; }
-  .usuarios-lista .u-cab { display: flex; justify-content: space-between; gap: 6px; flex-wrap: wrap; align-items: center; }
+    .u-filtros { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-bottom: 6px; }
+  .u-filtros select { width: auto; max-width: 48vw; }
+  .usuarios-lista { list-style: none; padding: 0; margin: 0 0 12px; max-height: 420px; overflow-y: auto;
+                    border: 1px solid var(--borde); border-radius: 10px; }
+  .usuarios-lista > li { border-bottom: 1px solid var(--borde); }
+  .usuarios-lista > li:last-child { border-bottom: 0; }
+  .usuarios-lista summary { display: flex; align-items: center; gap: 8px; padding: 9px 10px; cursor: pointer; list-style: none; }
+  .usuarios-lista summary::-webkit-details-marker { display: none; }
+  .usuarios-lista summary::before { content: '▸'; color: var(--gris); }
+  .usuarios-lista details[open] summary::before { content: '▾'; }
+  .usuarios-lista details[open] summary { background: #f3f6f9; }
+  .usuarios-lista .u-id { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .usuarios-lista .u-rol { color: var(--gris); font-size: .85rem; white-space: nowrap; }
+  .usuarios-lista .u-marcas { margin-left: auto; display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+  .usuarios-lista .u-cuerpo { padding: 0 10px 10px 26px; }
   .usuarios-lista .u-acciones { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .usuarios-lista .ayuda { padding: 10px; }
   .clave-temporal { background: #eef6ff; border: 1px solid var(--azul2); border-radius: 10px; padding: 12px; margin: 10px 0; }
   .clave-temporal code { font-size: 1.2rem; letter-spacing: 2px; background: #fff; padding: 2px 8px; border-radius: 6px; }
   .banner-prueba { background: #b54708; color: #fff; text-align: center; font-size: .8rem; font-weight: 600; padding: 4px; }
@@ -291,6 +304,11 @@
       <div id="t-admin" class="panel" hidden>
         <div class="tarjeta">
           <h2>Usuarios</h2>
+          <div class="u-filtros">
+            <input id="u-buscar" type="search" placeholder="Buscar usuario o nombre" autocomplete="off" aria-label="Buscar usuario">
+            <select id="u-filtro" aria-label="Filtrar usuarios"></select>
+          </div>
+          <p id="u-total" class="ayuda"></p>
           <ul id="u-lista" class="usuarios-lista"></ul>
           <div id="u-temporal" class="clave-temporal" hidden></div>
           <h2 id="u-titulo">Nuevo usuario</h2>
@@ -532,6 +550,7 @@
     ['c-lista', 'c-enlaces', 'ctl-info', 'u-lista', 'a-enlaces', 'u-temporal', 'lista-archivos'].forEach(id => { $(id).innerHTML = ''; });
     $('u-temporal').hidden = true; $('a-reset-tarjeta').hidden = true;
     $('c-total').textContent = ''; $('c-buscar').value = '';
+    $('u-buscar').value = ''; $('u-filtro').innerHTML = ''; $('u-total').textContent = ''; st.usuarios = null; st.uAbierto = null;
     st.lista = []; st.archivos = [];
     $('resultado').hidden = true; $('res-manual').hidden = true; $('f-reporte').hidden = false;
     $('in-ubicacion').value = ''; $('in-descripcion').value = ''; $('in-reporta').value = '';
@@ -845,13 +864,37 @@
   async function cargarUsuarios() {
     const ul = $('u-lista'); ul.innerHTML = '';
     ul.appendChild(el('li', { class: 'ayuda', text: 'Cargando usuarios…' }));
-    try { pintarUsuarios(await api('api_usuarios', st.codigo)); }
+    try { st.usuarios = await api('api_usuarios', st.codigo); pintarUsuarios(); }
     catch (e) { ul.innerHTML = ''; toast(msgError(e), true); }
   }
   function nombreRol(l) { return l === 'ADMIN' ? 'Administrador' : nombreLibro(l); }
-  function pintarUsuarios(lista) {
+  const necesitaAtencion = u => !u.activo || u.bloqueado || !u.tieneClave || u.debeCambiar;
+  /** Opciones del filtro: todos, los que requieren atención y uno por torre/rol (con su conteo). */
+  function opcionesFiltroUsuarios() {
+    const lista = st.usuarios || [], sel = $('u-filtro'), antes = sel.value || 'TODOS';
+    const cuenta = f => lista.filter(f).length;
+    const ops = [{ value: 'TODOS', text: 'Todos (' + lista.length + ')' },
+      { value: 'ATENCION', text: '⚠️ Requieren atención (' + cuenta(necesitaAtencion) + ')' }]
+      .concat(Array.from($('u-libro').options).map(o => ({ value: o.value, text: o.text + ' (' + cuenta(u => u.libro === o.value) + ')' })));
+    opciones(sel, ops);
+    sel.value = ops.some(o => o.value === antes) ? antes : 'TODOS';
+  }
+  $('u-buscar').addEventListener('input', () => pintarUsuarios());
+  $('u-filtro').addEventListener('change', () => pintarUsuarios());
+  function pintarUsuarios() {
     const ul = $('u-lista'); ul.innerHTML = '';
-    const yo = st.datos.sesion.usuarioId;
+    const yo = st.datos.sesion.usuarioId, todos = st.usuarios || [];
+    opcionesFiltroUsuarios();
+    const f = $('u-filtro').value, q = $('u-buscar').value.trim().toLowerCase();
+    const orden = Array.from($('u-libro').options).map(o => o.value);
+    const lista = todos.filter(u => (f === 'TODOS' || (f === 'ATENCION' ? necesitaAtencion(u) : u.libro === f)) &&
+        (!q || (u.usuario + ' ' + (u.nombre || '')).toLowerCase().indexOf(q) >= 0))
+      // Bloqueados primero; luego por torre/rol y usuario.
+      .sort((a, b) => (b.bloqueado ? 1 : 0) - (a.bloqueado ? 1 : 0) || orden.indexOf(a.libro) - orden.indexOf(b.libro) ||
+        a.usuario.localeCompare(b.usuario));
+    $('u-total').textContent = lista.length === todos.length ? todos.length + ' usuarios. Toque uno para ver sus opciones.'
+      : 'Mostrando ' + lista.length + ' de ' + todos.length + ' usuarios.';
+    if (!lista.length) ul.appendChild(el('li', { class: 'ayuda', text: 'Ningún usuario coincide.' }));
     lista.forEach(u => {
       const accion = (txt, fn, sec) => el('button', { class: 'btn mini' + (sec ? ' btn-sec' : ''), type: 'button', text: txt, onclick: fn });
       // Acciones que llaman al servidor: indicador en el propio botón mientras responde.
@@ -868,13 +911,22 @@
       }));
       const marcas = [!u.activo ? ['Inactivo', 'mal'] : null, u.bloqueado ? ['Bloqueado', 'mal'] : null,
         !u.tieneClave ? ['Sin contraseña', 'pend'] : u.debeCambiar ? ['Contraseña temporal', 'pend'] : null].filter(Boolean);
-      ul.appendChild(el('li', {}, [
-        el('div', { class: 'u-cab' }, [el('b', { text: u.usuario + (u.usuario === yo ? ' (usted)' : '') }),
-          el('span', {}, marcas.map(m => el('span', { class: 'badge ' + m[1], text: m[0] })))]),
-        el('div', { class: 'meta', text: nombreRol(u.libro) + ' · ' + (u.nombre || '—') +
-          (u.ultimo ? ' · último ingreso ' + u.ultimo : ' · nunca ha ingresado') }),
-        el('div', { class: 'u-acciones' }, acciones),
-      ]));
+      const det = el('details', {}, [
+        el('summary', {}, [el('span', { class: 'u-id', text: u.usuario + (u.usuario === yo ? ' (usted)' : '') }),
+          el('span', { class: 'u-rol', text: nombreRol(u.libro) }),
+          el('span', { class: 'u-marcas' }, marcas.map(m => el('span', { class: 'badge ' + m[1], text: m[0] })))]),
+        el('div', { class: 'u-cuerpo' }, [
+          el('div', { class: 'ayuda', text: (u.nombre || '—') + (u.ultimo ? ' · último ingreso ' + u.ultimo : ' · nunca ha ingresado') }),
+          el('div', { class: 'u-acciones' }, acciones)]),
+      ]);
+      // Uno abierto a la vez; se mantiene abierto al recargar tras una acción.
+      if (st.uAbierto === u.usuario) det.open = true;
+      det.addEventListener('toggle', () => {
+        if (!det.open) { if (st.uAbierto === u.usuario) st.uAbierto = null; return; }
+        st.uAbierto = u.usuario;
+        ul.querySelectorAll('details[open]').forEach(d => { if (d !== det) d.open = false; });
+      });
+      ul.appendChild(el('li', {}, [det]));
     });
   }
   function formUsuario(u) {
