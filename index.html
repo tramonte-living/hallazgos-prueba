@@ -668,6 +668,8 @@
     $('progreso').hidden = false;
     $('barra-prog-in').style.width = Math.round(pct) + '%';
     $('progreso-txt').textContent = txt;
+    // Durante el envío, el mismo estado va dentro del botón (visible aunque no se vea el final de la página).
+    if (st.enviando) $('btn-enviar').replaceChildren(el('span', { class: 'giro-mini' }), txt);
   }
 
   // ---------- envío resistente a cortes de conexión ----------
@@ -768,8 +770,9 @@
   });
 
   async function enviar() {
-    const btn = $('btn-enviar'); btn.disabled = true; $('btn-terminar').disabled = true;
+    const btn = $('btn-enviar'); btn.disabled = true; btn.classList.add('ocupado'); $('btn-terminar').disabled = true;
     st.enviando = true; pantallaEncendida(true);
+    btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
     try {
       // La clave se crea una vez por reporte; los reintentos reenvían la misma.
       if (!st.envio) st.envio = { clave: claveAleatoria() };
@@ -813,8 +816,9 @@
       toast((enCurso() ? 'Envío de ' + st.envio.id + ' en pausa: ' : 'No se pudo registrar: ') + msgError(e), true);
     } finally {
       st.enviando = false; pantallaEncendida(false);
-      btn.disabled = false; $('btn-terminar').disabled = false;
+      btn.disabled = false; btn.classList.remove('ocupado'); $('btn-terminar').disabled = false;
       pintarEnvio();
+      if (enCurso()) $('envio-pendiente').scrollIntoView({ behavior: 'smooth', block: 'center' });
       setTimeout(() => { $('progreso').hidden = true; }, 800);
     }
   }
