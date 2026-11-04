@@ -76,6 +76,8 @@
     .archivo .estado-sub { font-size: .8rem; }
   
     .progreso { margin-top: 12px; }
+  .subir.desactivado { opacity: .45; pointer-events: none; }
+  #envio-pendiente { margin: 10px 0; }
     .barra-prog { height: 10px; background: #e3e9ef; border-radius: 6px; overflow: hidden; }
     #barra-prog-in { height: 100%; width: 0; background: var(--azul2); transition: width .3s; }
   
@@ -246,7 +248,7 @@
 
           <div class="campo">
             <label>Fotos / videos</label>
-            <label class="btn btn-sec subir">
+            <label class="btn btn-sec subir" id="subir-archivos">
               ➕ Agregar fotos o videos
               <input id="in-archivos" type="file" accept="image/*,video/*" multiple hidden>
             </label>
@@ -255,6 +257,11 @@
             <ul id="lista-archivos" class="archivos"></ul>
           </div>
 
+          <div id="envio-pendiente" class="aviso-manual" hidden>
+            <p id="envio-pendiente-txt"></p>
+            <button id="btn-terminar" class="btn btn-sec mini" type="button">Terminar sin los archivos que faltan</button>
+            <button id="btn-descartar-envio" class="btn btn-sec mini" type="button">Descartar</button>
+          </div>
           <button id="btn-enviar" class="btn grande" type="submit">Enviar reporte</button>
           <div id="progreso" class="progreso" hidden>
             <div class="barra-prog"><div id="barra-prog-in"></div></div>
@@ -398,15 +405,26 @@
   // Motor (Apps Script). text/plain evita la verificación previa CORS; sin cookies, sin cuentas de Google.
   const API_URL = 'https://script.google.com/macros/s/AKfycbxonnSoJLmaazla-p6yqDdr1AvRuJ9h2gdMniqX9-MesadREJWax7nSOeMt-x4Xx0zz/exec'; // publicar.py lo reemplaza según el ambiente
   const ES_PRUEBA = true;
-  async function api(fn) {
-    const args = Array.prototype.slice.call(arguments, 1);
-    let resp;
+  // Tiempo máximo de espera de las llamadas del envío (las demás esperan lo que tome el servidor).
+  const TIEMPO_MAX = { api_crearHallazgo: 90000, api_finalizarHallazgo: 90000 };
+  function api(fn) { return llamar(fn, Array.prototype.slice.call(arguments, 1), TIEMPO_MAX[fn]); }
+  /** Error de conexión (sin señal, tiempo agotado o respuesta cortada): se puede reintentar. */
+  function errorRed(msg) { const e = new Error(msg); e.red = true; return e; }
+  async function llamar(fn, args, ms) {
+    const ctl = ms && window.AbortController ? new AbortController() : null;
+    const reloj = ctl && setTimeout(() => ctl.abort(), ms);
+    let resp, d;
     try {
-      resp = await fetch(API_URL, { method: 'POST', credentials: 'omit', redirect: 'follow',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ fn: fn, args: args }) });
-    } catch (e) { throw new Error('Sin conexión con el servidor. Revise su internet e intente de nuevo.'); }
-    let d;
-    try { d = await resp.json(); } catch (e) { throw new Error('El servidor no respondió correctamente (' + resp.status + '). Intente de nuevo.'); }
+      try {
+        resp = await fetch(API_URL, { method: 'POST', credentials: 'omit', redirect: 'follow', signal: ctl ? ctl.signal : undefined,
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ fn: fn, args: args }) });
+      } catch (e) {
+        throw errorRed(ctl && ctl.signal.aborted ? 'El servidor tardó demasiado en responder (conexión lenta).'
+          : 'Sin conexión con el servidor. Revise su internet e intente de nuevo.');
+      }
+      try { d = await resp.json(); }
+      catch (e) { throw errorRed('El servidor no respondió correctamente (' + resp.status + '). Intente de nuevo.'); }
+    } finally { if (reloj) clearTimeout(reloj); }
     if (!d.ok) {
       if (/^Sesión (vencida|no válida)/.test(d.error || '') && fn !== 'api_inicio') sesionVencida(d.error);
       else if (/^Debe cambiar su contraseña/.test(d.error || '')) abrirCambioClave(true);
@@ -551,7 +569,7 @@
     $('u-temporal').hidden = true; $('a-reset-tarjeta').hidden = true;
     $('c-total').textContent = ''; $('c-buscar').value = '';
     $('u-buscar').value = ''; $('u-filtro').innerHTML = ''; $('u-total').textContent = ''; st.usuarios = null; st.uAbierto = null;
-    st.lista = []; st.archivos = [];
+    st.lista = []; st.archivos = []; st.envio = null;
     $('resultado').hidden = true; $('res-manual').hidden = true; $('f-reporte').hidden = false;
     $('in-ubicacion').value = ''; $('in-descripcion').value = ''; $('in-reporta').value = '';
   }
@@ -572,6 +590,7 @@
     actualizarZonas();
     opciones($('sel-categoria'), d.categorias, 'Seleccione…');
     fechaHoy();
+    pintarEnvio();
 
     opciones($('c-libro'), libros);
     if (s.libro) $('c-libro').value = s.libro;
@@ -637,7 +656,7 @@
           el('div', { class: 'nombre', text: (i + 1) + '. ' + a.file.name }),
           el('div', { class: 'estado-sub', text: nota }),
         ]),
-        el('button', { class: 'quitar', type: 'button', title: 'Quitar', text: '✕', onclick: () => {
+        enCurso() ? null : el('button', { class: 'quitar', type: 'button', title: 'Quitar', text: '✕', onclick: () => {
           if (a.url) URL.revokeObjectURL(a.url);
           st.archivos.splice(i, 1); pintarArchivos();
         } }),
@@ -651,63 +670,161 @@
     $('progreso-txt').textContent = txt;
   }
 
-  $('f-reporte').addEventListener('submit', async ev => {
-    ev.preventDefault();
-    const datos = {
+  // ---------- envío resistente a cortes de conexión ----------
+  // st.envio = { clave, id, ticket }: la clave evita duplicados si se pierde la respuesta; con id el hallazgo
+  // ya existe y "Reintentar" solo sube lo que falta (el permiso de carga dura 12 h).
+  const ESPERAS = [3, 10, 30]; // segundos entre reintentos ante fallas de red
+  const ESPERA_SENAL_MAX = 5 * 60000;
+  const enCurso = () => !!(st.envio && st.envio.id);
+  const esperar = ms => new Promise(r => setTimeout(r, ms));
+  function claveAleatoria() {
+    const b = new Uint8Array(16); crypto.getRandomValues(b);
+    return Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
+  }
+  /** Sin señal: espera a que vuelva (máximo 5 minutos). */
+  function esperarSenal() {
+    if (navigator.onLine !== false) return Promise.resolve();
+    return new Promise((ok, mal) => {
+      const listo = () => { clearTimeout(t); window.removeEventListener('online', listo); ok(); };
+      const t = setTimeout(() => { window.removeEventListener('online', listo); mal(errorRed('Sin señal.')); }, ESPERA_SENAL_MAX);
+      window.addEventListener('online', listo);
+    });
+  }
+  /** Ejecuta fn reintentando solo ante fallas de red; los errores del servidor (datos no válidos) no se reintentan. */
+  async function conReintentos(fn, txt, pct) {
+    for (let i = 0; ; i++) {
+      if (navigator.onLine === false) { progreso(pct, '📶 Sin señal: esperando conexión… (no cierre la página)'); await esperarSenal(); }
+      progreso(pct, txt);
+      try { return await fn(); }
+      catch (e) {
+        if (!e.red || i >= ESPERAS.length) throw e;
+        for (let sg = ESPERAS[i]; sg > 0; sg--) { progreso(pct, 'Conexión inestable. Reintentando en ' + sg + ' s…'); await esperar(1000); }
+      }
+    }
+  }
+  /** Pantalla encendida mientras se envía (si el celular se bloquea, el navegador puede cortar la subida). */
+  async function pantallaEncendida(si) {
+    try {
+      if (si && 'wakeLock' in navigator && !st.wake) { st.wake = await navigator.wakeLock.request('screen'); st.wake.onrelease = () => { st.wake = null; }; }
+      else if (!si && st.wake) { await st.wake.release(); st.wake = null; }
+    } catch (e) { /* no disponible: se sigue sin ella */ }
+  }
+  document.addEventListener('visibilitychange', () => { if (st.enviando && document.visibilityState === 'visible') pantallaEncendida(true); });
+  // Enviando o con un envío a medias: el navegador pregunta antes de cerrar o recargar.
+  window.addEventListener('beforeunload', ev => { if (st.enviando || enCurso()) { ev.preventDefault(); ev.returnValue = ''; } });
+
+  /** Hallazgo ya registrado con archivos por subir: bloquea el formulario y muestra cómo seguir. */
+  function pintarEnvio() {
+    const ec = enCurso();
+    $('f-reporte').querySelectorAll('select, input, textarea').forEach(x => { x.disabled = ec; });
+    $('subir-archivos').classList.toggle('desactivado', ec);
+    $('envio-pendiente').hidden = !ec;
+    $('btn-enviar').textContent = ec ? '🔁 Reintentar envío de ' + st.envio.id : 'Enviar reporte';
+    if (ec) {
+      const faltan = st.archivos.filter(a => !a.hecho && !a.pendiente).length;
+      $('envio-pendiente-txt').textContent = '⚠️ El hallazgo ' + st.envio.id + ' ya quedó registrado' +
+        (faltan ? '; faltan ' + faltan + ' archivo(s) por subir.' : ', falta terminar el envío.') +
+        ' Cuando tenga señal pulse "Reintentar envío". No cierre ni recargue la página.';
+      $('btn-terminar').hidden = !faltan;
+    }
+    pintarArchivos();
+  }
+
+  function leerFormulario() {
+    return {
       libro: $('sel-libro').value, zona: $('sel-zona').value, categoria: $('sel-categoria').value,
       fechaReporte: $('in-fecha').value,
       ubicacion: $('in-ubicacion').value.trim(), descripcion: $('in-descripcion').value.trim(),
       reportadoPor: $('in-reporta').value.trim(),
     };
-    if (!datos.zona) return toast('Seleccione el piso / zona.', true);
-    if (!datos.fechaReporte) return toast('Indique la fecha del reporte.', true);
-    if (datos.fechaReporte > hoyISO()) return toast('La fecha del reporte no puede ser futura.', true);
-    if (!datos.categoria) return toast('Seleccione la categoría.', true);
-    if (!datos.descripcion) return toast('Escriba la descripción.', true);
-    if (st.archivos.some(a => a.malo)) return toast('Quite los archivos marcados en rojo (solo fotos o videos).', true);
-    if (!st.archivos.length && !confirm('¿Enviar el reporte sin fotos ni videos?')) return;
+  }
 
-    const btn = $('btn-enviar'); btn.disabled = true;
-    const archivos = st.archivos.slice();
-    datos.nArchivos = archivos.length;
-    const subidos = [], pendientes = []; let id = null;
+  $('f-reporte').addEventListener('submit', ev => {
+    ev.preventDefault();
+    if (st.enviando) return;
+    if (!enCurso()) {
+      const datos = leerFormulario();
+      if (!datos.zona) return toast('Seleccione el piso / zona.', true);
+      if (!datos.fechaReporte) return toast('Indique la fecha del reporte.', true);
+      if (datos.fechaReporte > hoyISO()) return toast('La fecha del reporte no puede ser futura.', true);
+      if (!datos.categoria) return toast('Seleccione la categoría.', true);
+      if (!datos.descripcion) return toast('Escriba la descripción.', true);
+      if (st.archivos.some(a => a.malo)) return toast('Quite los archivos marcados en rojo (solo fotos o videos).', true);
+      if (!st.archivos.length && !confirm('¿Enviar el reporte sin fotos ni videos?')) return;
+    }
+    enviar();
+  });
+  $('btn-terminar').addEventListener('click', () => {
+    if (st.enviando || !enCurso()) return;
+    if (!confirm('¿Terminar sin los archivos que faltan? El hallazgo quedará "Incompleto" y se le indicará cómo entregarlos.')) return;
+    st.archivos.forEach(a => { if (!a.hecho) { a.pendiente = true; a.estado = '⏳ Entrega manual'; } });
+    enviar();
+  });
+  $('btn-descartar-envio').addEventListener('click', () => {
+    if (st.enviando || !enCurso()) return;
+    if (!confirm('¿Descartar este envío? El hallazgo ' + st.envio.id + ' queda registrado como "Incompleto" y las fotos que ' +
+      'falten deberá entregarlas al administrador.')) return;
+    reiniciarFormulario();
+  });
+
+  async function enviar() {
+    const btn = $('btn-enviar'); btn.disabled = true; $('btn-terminar').disabled = true;
+    st.enviando = true; pantallaEncendida(true);
     try {
-      progreso(3, 'Registrando hallazgo…');
-      const r = await api('api_crearHallazgo', st.codigo, datos);
-      id = r.id; const ticket = r.ticket;
-      for (let i = 0; i < archivos.length; i++) {
-        const a = archivos[i];
-        const pendiente = () => pendientes.push({ indice: i + 1, original: a.file.name, mime: a.file.type });
-        if (a.manual) { pendiente(); a.estado = '⏳ Entrega manual (supera ' + st.datos.limiteMB + ' MB)'; pintarArchivos(); continue; }
-        const base = 5 + 90 * i / archivos.length;
-        progreso(base, 'Subiendo ' + (i + 1) + ' de ' + archivos.length + ' (' + mb(a.file.size) + ')…');
-        let ok = false;
-        for (let intento = 1; intento <= 2 && !ok; intento++) {
-          try {
-            const b64 = await leerBase64(a.file);
-            const res = await api('api_subirEvidencia', st.codigo, id, ticket, i + 1, a.file.name, a.file.type, b64);
-            subidos.push(res); ok = true; a.estado = '✓ ' + res.nombre;
-          } catch (e) {
-            if (intento === 2) { pendiente(); a.fallo = true; a.estado = '✗ No se pudo subir: ' + msgError(e); }
-          }
+      // La clave se crea una vez por reporte; los reintentos reenvían la misma.
+      if (!st.envio) st.envio = { clave: claveAleatoria() };
+      if (!st.envio.id) {
+        const datos = leerFormulario();
+        datos.nArchivos = st.archivos.length; datos.claveEnvio = st.envio.clave;
+        st.archivos.forEach((a, i) => { a.indice = i + 1; });
+        const r = await conReintentos(() => api('api_crearHallazgo', st.codigo, datos), 'Registrando hallazgo…', 3);
+        st.envio.id = r.id; st.envio.ticket = r.ticket;
+        pintarEnvio();
+      }
+      const id = st.envio.id, ticket = st.envio.ticket, lista = st.archivos;
+      for (let i = 0; i < lista.length; i++) {
+        const a = lista[i];
+        if (a.hecho || a.pendiente) continue;
+        if (a.manual) { a.pendiente = true; a.estado = '⏳ Entrega manual (supera ' + st.datos.limiteMB + ' MB)'; pintarArchivos(); continue; }
+        const txt = 'Subiendo ' + (i + 1) + ' de ' + lista.length + ' (' + mb(a.file.size) + ')…';
+        // Tiempo máximo según el tamaño: 2 min + 1 min por cada 3 MB (conexiones lentas).
+        const ms = 120000 + Math.ceil(a.file.size / 3145728) * 60000;
+        try {
+          const b64 = await leerBase64(a.file);
+          const res = await conReintentos(() => llamar('api_subirEvidencia',
+            [st.codigo, id, ticket, a.indice, a.file.name, a.file.type, b64], ms), txt, 5 + 90 * i / lista.length);
+          a.hecho = true; a.fallo = false; a.estado = '✓ ' + res.nombre;
+        } catch (e) {
+          if (e.red) { a.estado = '⏸ Sin subir (conexión)'; throw e; } // se reanuda con "Reintentar envío"
+          a.pendiente = true; a.fallo = true; a.estado = '✗ No se pudo subir: ' + msgError(e);
         }
         pintarArchivos();
       }
-      progreso(97, 'Finalizando…');
-      const fin = await api('api_finalizarHallazgo', st.codigo, id, ticket, pendientes);
+      const pendientes = lista.filter(a => a.pendiente).map(a => ({ indice: a.indice, original: a.file.name, mime: a.file.type }));
+      const fin = await conReintentos(() => api('api_finalizarHallazgo', st.codigo, id, ticket, pendientes), 'Finalizando…', 97);
       progreso(100, 'Listo');
+      st.envio = null;
       $('res-id').textContent = id;
       $('res-detalle').textContent = fin.evidencias + ' evidencia(s) guardada(s).';
       mostrarManual(fin);
       $('f-reporte').hidden = true; $('resultado').hidden = false;
       window.scrollTo(0, 0);
     } catch (e) {
-      toast((id ? 'Error en ' + id + ': ' : 'No se pudo registrar: ') + msgError(e), true);
+      toast((enCurso() ? 'Envío de ' + st.envio.id + ' en pausa: ' : 'No se pudo registrar: ') + msgError(e), true);
     } finally {
-      btn.disabled = false;
+      st.enviando = false; pantallaEncendida(false);
+      btn.disabled = false; $('btn-terminar').disabled = false;
+      pintarEnvio();
       setTimeout(() => { $('progreso').hidden = true; }, 800);
     }
-  });
+  }
+  function reiniciarFormulario() {
+    st.archivos.forEach(a => a.url && URL.revokeObjectURL(a.url));
+    st.archivos = []; st.envio = null;
+    $('in-ubicacion').value = ''; $('in-descripcion').value = ''; $('sel-categoria').value = ''; $('in-reporta').value = '';
+    fechaHoy();
+    pintarEnvio();
+  }
 
   function mostrarManual(fin) {
     const caja = $('res-manual');
@@ -728,10 +845,7 @@
   }
 
   $('btn-otro').addEventListener('click', () => {
-    st.archivos.forEach(a => a.url && URL.revokeObjectURL(a.url));
-    st.archivos = []; pintarArchivos();
-    $('in-ubicacion').value = ''; $('in-descripcion').value = ''; $('sel-categoria').value = ''; $('in-reporta').value = '';
-    fechaHoy();
+    reiniciarFormulario();
     $('resultado').hidden = true; $('res-manual').hidden = true; $('f-reporte').hidden = false;
   });
 
