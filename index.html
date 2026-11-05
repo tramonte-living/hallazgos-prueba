@@ -77,6 +77,9 @@
   
     .progreso { margin-top: 12px; }
   .subir.desactivado { opacity: .45; pointer-events: none; }
+  .botones-ev { display: flex; gap: 8px; flex-wrap: wrap; }
+  .botones-ev .subir { flex: 1 1 140px; text-align: center; }
+  #ev-contador { font-weight: normal; color: var(--gris); }
   #envio-pendiente { margin: 10px 0; }
     .barra-prog { height: 10px; background: #e3e9ef; border-radius: 6px; overflow: hidden; }
     #barra-prog-in { height: 100%; width: 0; background: var(--azul2); transition: width .3s; }
@@ -247,13 +250,19 @@
           </div>
 
           <div class="campo">
-            <label>Fotos / videos</label>
-            <label class="btn btn-sec subir" id="subir-archivos">
-              ➕ Agregar fotos o videos
-              <input id="in-archivos" type="file" accept="image/*,video/*" multiple hidden>
-            </label>
-            <p class="ayuda">Puede agregar varios. Los archivos de más de <span id="limite-mb">50</span> MB no se suben
-              por la página: al enviar se le indicará cómo entregarlos.</p>
+            <label>Fotos / videos <span id="ev-contador"></span></label>
+            <div class="botones-ev">
+              <label class="btn subir" id="subir-camara" hidden>
+                📷 Tomar foto
+                <input id="in-camara" type="file" accept="image/*" capture="environment" hidden>
+              </label>
+              <label class="btn btn-sec subir" id="subir-archivos">
+                <span id="txt-galeria">➕ Agregar fotos o videos</span>
+                <input id="in-archivos" type="file" accept="image/*,video/*" multiple hidden>
+              </label>
+            </div>
+            <p class="ayuda">Máximo <span id="max-ev">5</span> por hallazgo. Los archivos de más de <span id="limite-mb">50</span> MB
+              no se suben por la página: al enviar se le indicará cómo entregarlos.</p>
             <ul id="lista-archivos" class="archivos"></ul>
           </div>
 
@@ -349,6 +358,18 @@
             <label for="a-limite">Límite por archivo (MB)</label>
             <input id="a-limite" type="number" min="1" max="2000">
           </div>
+          <div class="campo corto">
+            <label for="a-maxev">Máximo de fotos/videos por hallazgo</label>
+            <input id="a-maxev" type="number" min="1" max="30">
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="a-camara">
+            <span>Mostrar "📷 Tomar foto" a los usuarios de torre (el administrador siempre lo ve)</span>
+          </label>
+          <label class="switch">
+            <input type="checkbox" id="a-marca">
+            <span>Marca de agua en las fotos tomadas con la app (ID, fecha, hora y GPS)</span>
+          </label>
           <button id="a-guardar" class="btn" type="button">Guardar ajustes</button>
         </div>
         <div class="tarjeta">
@@ -582,6 +603,8 @@
     $('tab-admin').hidden = s.rol !== 'ADMIN';
     limpiarPantalla();
     $('limite-mb').textContent = d.limiteMB;
+    $('subir-camara').hidden = !d.camara;
+    $('txt-galeria').textContent = d.camara ? '🖼️ Galería' : '➕ Agregar fotos o videos';
 
     const libros = d.libros.map(l => ({ value: l.id, text: l.nombre }));
     opciones($('sel-libro'), libros);
@@ -599,6 +622,9 @@
     if (d.ajustes) {
       $('a-cualquier').checked = !!d.ajustes.cualquierTorre;
       $('a-limite').value = d.ajustes.limiteMB;
+      $('a-maxev').value = d.ajustes.maxEvidencias;
+      $('a-camara').checked = !!d.ajustes.camaraTorres;
+      $('a-marca').checked = !!d.ajustes.marcaAgua;
       $('a-fallos').textContent = '🔒 Intentos de ingreso fallidos en la última hora: ' + (d.ajustes.fallosHora || 0) +
         (d.ajustes.fallosHora > 20 ? ' ⚠️ Muchos intentos: revise los usuarios bloqueados.' : '');
       opciones($('u-libro'), d.librosAdmin.map(l => ({ value: l.id, text: l.nombre })).concat([{ value: 'ADMIN', text: 'Administrador' }]));
@@ -634,22 +660,110 @@
   function actualizarZonas() { opciones($('sel-zona'), zonasDeLibro($('sel-libro').value), 'Seleccione…'); }
   $('sel-libro').addEventListener('change', actualizarZonas);
 
-  $('in-archivos').addEventListener('change', ev => {
-    Array.prototype.forEach.call(ev.target.files, f => st.archivos.push({ file: f, url: /^image\//.test(f.type) ? URL.createObjectURL(f) : null }));
-    ev.target.value = '';
+  const maxEvidencias = () => st.datos.maxEvidencias || 5;
+  function agregarArchivos(files, captura) {
+    const cupo = maxEvidencias() - st.archivos.length;
+    if (files.length > cupo) toast('Máximo ' + maxEvidencias() + ' fotos o videos por hallazgo' +
+      (cupo > 0 ? ': se agregaron ' + cupo + '.' : '.'), true);
+    files.slice(0, Math.max(0, cupo)).forEach(f => st.archivos.push({
+      file: f, url: /^image\//.test(f.type) ? URL.createObjectURL(f) : null, captura: captura || null }));
     pintarArchivos();
+  }
+  $('in-archivos').addEventListener('change', ev => {
+    const files = Array.from(ev.target.files); ev.target.value = '';
+    agregarArchivos(files);
   });
+  // Cámara: se pide la ubicación al abrirla (mientras se encuadra la foto) y se guarda con la hora de la toma.
+  $('subir-camara').addEventListener('click', () => { if (st.datos.marcaAgua) pedirUbicacion(); });
+  $('in-camara').addEventListener('change', ev => {
+    const files = Array.from(ev.target.files); ev.target.value = '';
+    if (!files.length) return;
+    const captura = { fecha: new Date(), gps: ubicacionReciente(), camara: true };
+    agregarArchivos(files, captura);
+    // Si el GPS responde después de la foto (hasta 20 s), se le asigna.
+    if (!captura.gps && st.gpsPendiente) st.gpsPendiente.then(g => {
+      if (g && !captura.gps && Date.now() - captura.fecha < 20000) { captura.gps = g; pintarArchivos(); }
+    });
+  });
+
+  // ---------- ubicación (GPS) ----------
+  function pedirUbicacion() {
+    if (!navigator.geolocation || st.gpsPendiente) return;
+    st.gpsPendiente = new Promise(ok => {
+      navigator.geolocation.getCurrentPosition(p => {
+        st.gps = { lat: p.coords.latitude, lng: p.coords.longitude, prec: Math.round(p.coords.accuracy || 0), t: Date.now() };
+        ok(st.gps);
+      }, err => { st.gpsError = err.code === 1 ? 'permiso negado' : 'no disponible'; ok(null); },
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 30000 });
+    }).finally(() => { setTimeout(() => { st.gpsPendiente = null; }, 0); });
+  }
+  /** Última ubicación si es de los últimos 2 minutos. */
+  const ubicacionReciente = () => (st.gps && Date.now() - st.gps.t < 120000 ? st.gps : null);
+  const textoGps = g => g ? 'GPS ' + g.lat.toFixed(5) + ', ' + g.lng.toFixed(5) + ' (±' + g.prec + ' m)' : 'GPS no disponible';
+  const fechaHora = d => d.toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric' }) + ' ' +
+    d.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+
+  // ---------- marca de agua ----------
+  // Se aplica al enviar (ya se conoce el ID). Si falla, la foto se sube sin marca: nunca bloquea el envío.
+  const LADO_MAX = 4000; // los navegadores de iPhone no procesan imágenes mucho más grandes en un canvas
+  function cargarImagen(file) {
+    return new Promise((ok, mal) => {
+      const url = URL.createObjectURL(file), img = new Image();
+      img.onload = () => { URL.revokeObjectURL(url); ok(img); };
+      img.onerror = () => { URL.revokeObjectURL(url); mal(new Error('No se pudo leer la imagen.')); };
+      img.src = url;
+    });
+  }
+  async function marcarFoto(file, lineas) {
+    const img = await cargarImagen(file); // la orientación (foto vertical) la aplica el navegador
+    const esc = Math.min(1, LADO_MAX / Math.max(img.naturalWidth, img.naturalHeight));
+    const w = Math.round(img.naturalWidth * esc), h = Math.round(img.naturalHeight * esc);
+    const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+    const cx = cv.getContext('2d');
+    cx.drawImage(img, 0, 0, w, h);
+    const fs = Math.max(14, Math.round(Math.min(w, h) * 0.03)), alto = Math.round(fs * (lineas.length * 1.35 + 0.8));
+    cx.fillStyle = 'rgba(0,0,0,0.55)'; cx.fillRect(0, h - alto, w, alto);
+    cx.fillStyle = '#fff'; cx.textBaseline = 'top'; cx.font = 'bold ' + fs + 'px Arial, sans-serif';
+    lineas.forEach((t, i) => cx.fillText(t, Math.round(fs * 0.6), h - alto + Math.round(fs * (0.4 + i * 1.35)), w - fs * 1.2));
+    cx.font = fs * 0.8 + 'px Arial, sans-serif'; cx.textAlign = 'right';
+    cx.fillText('Tramonte Living', w - Math.round(fs * 0.6), h - alto + Math.round(fs * 1.75)); // en la 2.ª línea (la más corta)
+    const blob = await new Promise((ok, mal) => cv.toBlob(b => b ? ok(b) : mal(new Error('No se pudo generar la imagen.')), 'image/jpeg', 0.9));
+    cv.width = cv.height = 0; // libera memoria (celulares)
+    return new File([blob], file.name.replace(/\.[^.]*$/, '') + '.jpg', { type: 'image/jpeg', lastModified: Date.now() });
+  }
+  /** Antes de subir una foto de la cámara: marca de agua (si está activa) y texto para la descripción en Drive. */
+  async function prepararCaptura(a, id) {
+    if (!a.captura || a.preparada) return;
+    const c = a.captura, f = leerFormulario();
+    a.info = 'Tomada con la app: ' + fechaHora(c.fecha) + ' · ' + textoGps(c.gps) + ' · ' + (st.datos.sesion.usuario || '');
+    if (st.datos.marcaAgua && /^image\//.test(a.file.type)) {
+      try {
+        a.file = await marcarFoto(a.file, [
+          id + ' · ' + nombreLibro(f.libro) + ' · ' + f.zona + ' · ' + f.categoria,
+          fechaHora(c.fecha) + ' · ' + (st.datos.sesion.usuario || ''),
+          textoGps(c.gps),
+        ]);
+        a.info += ' · con marca de agua';
+      } catch (e) { a.info += ' · sin marca de agua (' + msgError(e) + ')'; }
+    }
+    a.preparada = true;
+  }
 
   function pintarArchivos() {
     const ul = $('lista-archivos'); ul.innerHTML = '';
-    const limite = st.datos.limiteMB * 1048576;
+    const limite = st.datos.limiteMB * 1048576, max = maxEvidencias(), lleno = st.archivos.length >= max;
+    $('max-ev').textContent = max;
+    $('ev-contador').textContent = st.archivos.length ? '(' + st.archivos.length + ' de ' + max + ')' : '';
+    document.querySelectorAll('.botones-ev .subir').forEach(b => b.classList.toggle('desactivado', lleno || enCurso()));
     st.archivos.forEach((a, i) => {
       const tipoOk = /^(image|video)\//.test(a.file.type);
       a.malo = !tipoOk;
       a.manual = tipoOk && a.file.size > limite;
       const mini = a.url ? el('img', { class: 'mini', src: a.url, alt: '' }) : el('div', { class: 'mini', text: /^video/.test(a.file.type) ? '🎬' : '📄' });
+      const toma = a.captura ? ' · 📷 ' + a.captura.fecha.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' }) +
+        (st.datos.marcaAgua ? (a.captura.gps ? ' · 📍 ±' + a.captura.gps.prec + ' m' : ' · 📍 sin ubicación') : '') : '';
       const nota = !tipoOk ? 'Tipo no permitido' : a.estado ||
-        (a.manual ? mb(a.file.size) + ' · supera ' + st.datos.limiteMB + ' MB: se entregará manualmente' : mb(a.file.size));
+        (a.manual ? mb(a.file.size) + ' · supera ' + st.datos.limiteMB + ' MB: se entregará manualmente' : mb(a.file.size) + toma);
       ul.appendChild(el('li', { class: 'archivo' + (a.malo ? ' malo' : a.manual || a.fallo ? ' manual' : '') }, [
         mini,
         el('div', { class: 'info' }, [
@@ -726,6 +840,7 @@
 
   /** Sube el archivo a[i] y devuelve el nombre con que quedó en Drive. */
   async function subirArchivo(a, id, ticket, i, total) {
+    if (a.captura && !a.preparada) { progreso(5 + 90 * i / total, 'Preparando foto ' + (i + 1) + ' de ' + total + '…'); await prepararCaptura(a, id); }
     if (!a.sinPartes) {
       try { return await subirPorPartes(a, id, ticket, i, total); }
       catch (e) {
@@ -738,7 +853,7 @@
     const ms = 120000 + Math.ceil(a.file.size / 3145728) * 60000;
     const b64 = await leerBase64(a.file);
     const res = await conReintentos(() => llamar('api_subirEvidencia',
-      [st.codigo, id, ticket, a.indice, a.file.name, a.file.type, b64], ms),
+      [st.codigo, id, ticket, a.indice, a.file.name, a.file.type, b64, a.info || ''], ms),
       'Subiendo ' + (i + 1) + ' de ' + total + ' (' + mb(a.file.size) + ')…', 5 + 90 * i / total);
     return res.nombre;
   }
@@ -767,7 +882,7 @@
     return conReintentos(async () => {
       if (!a.sesion) {
         try {
-          const r = await api('api_iniciarSubida', st.codigo, id, ticket, a.indice, a.file.name, a.file.type, tam);
+          const r = await api('api_iniciarSubida', st.codigo, id, ticket, a.indice, a.file.name, a.file.type, tam, a.info || '');
           a.sesion = r.url; a.nombreFinal = r.nombre; a.enviado = 0; a.verificar = false;
         } catch (e) {
           if (/SUBIDA_NO_DISPONIBLE|^Acción no válida/.test(e.message)) e.noDisponible = true; // motor sin la función nueva
@@ -819,7 +934,6 @@
   function pintarEnvio() {
     const ec = enCurso();
     $('f-reporte').querySelectorAll('select, input, textarea').forEach(x => { x.disabled = ec; });
-    $('subir-archivos').classList.toggle('desactivado', ec);
     // El aviso solo aparece si el envío quedó en pausa (no mientras se está subiendo).
     const pausa = ec && !st.enviando;
     $('envio-pendiente').hidden = !pausa;
@@ -856,6 +970,8 @@
       if (datos.fechaReporte > hoyISO()) return toast('La fecha del reporte no puede ser futura.', true);
       if (!datos.categoria) return toast('Seleccione la categoría.', true);
       if (!datos.descripcion) return toast('Escriba la descripción.', true);
+      if (st.archivos.length > maxEvidencias()) return toast('Máximo ' + maxEvidencias() + ' fotos o videos por hallazgo: quite ' +
+        (st.archivos.length - maxEvidencias()) + '.', true);
       if (st.archivos.some(a => a.malo)) return toast('Quite los archivos marcados en rojo (solo fotos o videos).', true);
       if (!st.archivos.length && !confirm('¿Enviar el reporte sin fotos ni videos?')) return;
     }
@@ -1073,8 +1189,11 @@
     try {
       const aj = await api('api_guardarAjustes', st.codigo, {
         cualquierTorre: $('a-cualquier').checked, limiteMB: Number($('a-limite').value) || 50,
+        maxEvidencias: Number($('a-maxev').value) || 5, camaraTorres: $('a-camara').checked, marcaAgua: $('a-marca').checked,
       });
-      st.datos.ajustes = aj; st.datos.limiteMB = aj.limiteMB; $('limite-mb').textContent = aj.limiteMB;
+      Object.assign(st.datos, { ajustes: aj, limiteMB: aj.limiteMB, maxEvidencias: aj.maxEvidencias, marcaAgua: aj.marcaAgua });
+      $('limite-mb').textContent = aj.limiteMB; $('a-maxev').value = aj.maxEvidencias;
+      pintarArchivos();
       toast('Ajustes guardados');
     } catch (e) { toast(msgError(e), true); }
   }));
