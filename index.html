@@ -673,32 +673,61 @@
     const files = Array.from(ev.target.files); ev.target.value = '';
     agregarArchivos(files);
   });
-  // Cámara: se pide la ubicación al abrirla (mientras se encuadra la foto) y se guarda con la hora de la toma.
-  $('subir-camara').addEventListener('click', () => { if (st.datos.marcaAgua) pedirUbicacion(); });
+  // Cámara: el GPS se enciende al abrirla (mientras se encuadra) y cada foto guarda la hora de la toma y su ubicación.
+  $('subir-camara').addEventListener('click', () => { if (st.datos.marcaAgua) gpsEncender(GPS_AFINAR); });
   $('in-camara').addEventListener('change', ev => {
     const files = Array.from(ev.target.files); ev.target.value = '';
     if (!files.length) return;
-    const captura = { fecha: new Date(), gps: ubicacionReciente(), camara: true };
+    const ahora = Date.now(), g = st.gps && ahora - st.gps.t < GPS_AFINAR ? st.gps : null;
+    const captura = { fecha: new Date(ahora), gps: g, primera: g, camara: true, fija: !st.datos.marcaAgua };
     agregarArchivos(files, captura);
-    // Si el GPS responde después de la foto (hasta 20 s), se le asigna.
-    if (!captura.gps && st.gpsPendiente) st.gpsPendiente.then(g => {
-      if (g && !captura.gps && Date.now() - captura.fecha < 20000) { captura.gps = g; pintarArchivos(); }
-    });
+    if (captura.fija) return;
+    gpsEncender(GPS_AFINAR);
+    setTimeout(() => { captura.fija = true; pintarArchivos(); gpsRevisarApagado(); }, GPS_AFINAR);
   });
 
   // ---------- ubicación (GPS) ----------
-  function pedirUbicacion() {
-    if (!navigator.geolocation || st.gpsPendiente) return;
-    st.gpsPendiente = new Promise(ok => {
-      navigator.geolocation.getCurrentPosition(p => {
-        st.gps = { lat: p.coords.latitude, lng: p.coords.longitude, prec: Math.round(p.coords.accuracy || 0), t: Date.now() };
-        ok(st.gps);
-      }, err => { st.gpsError = err.code === 1 ? 'permiso negado' : 'no disponible'; ok(null); },
-      { enableHighAccuracy: true, timeout: 20000, maximumAge: 30000 });
-    }).finally(() => { setTimeout(() => { st.gpsPendiente = null; }, 0); });
+  // Un solo GPS escuchando mientras haya fotos "afinando": cada foto se queda, durante sus primeros 30 s, con la
+  // lectura más precisa que esté cerca de su primera lectura (si la persona camina, no se le pega otro lugar).
+  const GPS_AFINAR = 30000;      // ms después de la toma en que la ubicación de la foto puede mejorar
+  const GPS_DISTANCIA_MAX = 50;  // m: lecturas más lejanas de la primera se descartan (salto del GPS o se movió)
+  function gpsEncender(ms) {
+    if (!navigator.geolocation || st.gpsError === 'bloqueada') return;
+    st.gpsHasta = Math.max(st.gpsHasta || 0, Date.now() + ms);
+    if (st.gpsVigia != null) return;
+    st.gpsVigia = navigator.geolocation.watchPosition(gpsLectura, err => {
+      if (err.code === 1) { // permiso negado: no se vuelve a pedir en esta visita
+        st.gpsError = 'bloqueada'; gpsApagar(); pintarArchivos();
+        toast('📍 Ubicación bloqueada: actívala en los permisos del navegador para que las fotos lleven GPS.', true);
+      } else st.gpsError = 'sin señal';
+    }, { enableHighAccuracy: true, maximumAge: 0, timeout: 30000 });
+    setTimeout(gpsRevisarApagado, ms + 1000);
   }
-  /** Última ubicación si es de los últimos 2 minutos. */
-  const ubicacionReciente = () => (st.gps && Date.now() - st.gps.t < 120000 ? st.gps : null);
+  function gpsApagar() {
+    if (st.gpsVigia != null) navigator.geolocation.clearWatch(st.gpsVigia);
+    st.gpsVigia = null;
+  }
+  /** Apaga el GPS cuando ya no hay fotos afinando ni la cámara recién abierta. */
+  function gpsRevisarApagado() {
+    const afinando = st.archivos.some(a => a.captura && !a.captura.fija);
+    if (!afinando && Date.now() >= (st.gpsHasta || 0)) gpsApagar();
+  }
+  function distanciaM(a, b) {
+    const r = Math.PI / 180, x = (b.lng - a.lng) * r * Math.cos((a.lat + b.lat) * r / 2), y = (b.lat - a.lat) * r;
+    return Math.sqrt(x * x + y * y) * 6371000;
+  }
+  function gpsLectura(p) {
+    const g = { lat: p.coords.latitude, lng: p.coords.longitude, prec: Math.round(p.coords.accuracy || 0), t: Date.now() };
+    st.gps = g; st.gpsError = null;
+    let cambio = false;
+    st.archivos.forEach(a => {
+      const c = a.captura;
+      if (!c || c.fija || g.t - c.fecha > GPS_AFINAR) return;
+      if (!c.primera) { c.primera = c.gps = g; cambio = true; return; }
+      if (g.prec < c.gps.prec && distanciaM(c.primera, g) <= Math.max(GPS_DISTANCIA_MAX, c.primera.prec)) { c.gps = g; cambio = true; }
+    });
+    if (cambio) pintarArchivos();
+  }
   const textoGps = g => g ? 'GPS ' + g.lat.toFixed(5) + ', ' + g.lng.toFixed(5) + ' (±' + g.prec + ' m)' : 'GPS no disponible';
   const fechaHora = d => d.toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric' }) + ' ' +
     d.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
@@ -735,6 +764,7 @@
   async function prepararCaptura(a, id) {
     if (!a.captura || a.preparada) return;
     const c = a.captura, f = leerFormulario();
+    c.fija = true; // al enviar se usa la mejor ubicación conseguida hasta ahora
     a.info = 'Tomada con la app: ' + fechaHora(c.fecha) + ' · ' + textoGps(c.gps) + ' · ' + (st.datos.sesion.usuario || '');
     if (st.datos.marcaAgua && /^image\//.test(a.file.type)) {
       try {
@@ -761,7 +791,8 @@
       a.manual = tipoOk && a.file.size > limite;
       const mini = a.url ? el('img', { class: 'mini', src: a.url, alt: '' }) : el('div', { class: 'mini', text: /^video/.test(a.file.type) ? '🎬' : '📄' });
       const toma = a.captura ? ' · 📷 ' + a.captura.fecha.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' }) +
-        (st.datos.marcaAgua ? (a.captura.gps ? ' · 📍 ±' + a.captura.gps.prec + ' m' : ' · 📍 sin ubicación') : '') : '';
+        (st.datos.marcaAgua ? ' · 📍 ' + (a.captura.gps ? '±' + a.captura.gps.prec + ' m' + (a.captura.fija ? '' : ' (afinando…)')
+          : st.gpsError === 'bloqueada' ? 'ubicación bloqueada' : a.captura.fija ? 'sin ubicación' : 'buscando…') : '') : '';
       const nota = !tipoOk ? 'Tipo no permitido' : a.estado ||
         (a.manual ? mb(a.file.size) + ' · supera ' + st.datos.limiteMB + ' MB: se entregará manualmente' : mb(a.file.size) + toma);
       ul.appendChild(el('li', { class: 'archivo' + (a.malo ? ' malo' : a.manual || a.fallo ? ' manual' : '') }, [
@@ -1022,7 +1053,7 @@
       const pendientes = lista.filter(a => a.pendiente).map(a => ({ indice: a.indice, original: a.file.name, mime: a.file.type }));
       const fin = await conReintentos(() => api('api_finalizarHallazgo', st.codigo, id, ticket, pendientes), 'Finalizando…', 97);
       progreso(100, 'Listo');
-      st.envio = null;
+      st.envio = null; gpsApagar();
       $('res-id').textContent = id;
       $('res-detalle').textContent = fin.evidencias + ' evidencia(s) guardada(s).';
       mostrarManual(fin);
@@ -1040,7 +1071,7 @@
   }
   function reiniciarFormulario() {
     st.archivos.forEach(a => a.url && URL.revokeObjectURL(a.url));
-    st.archivos = []; st.envio = null;
+    st.archivos = []; st.envio = null; gpsApagar();
     $('in-ubicacion').value = ''; $('in-descripcion').value = ''; $('sel-categoria').value = ''; $('in-reporta').value = '';
     fechaHoy();
     pintarEnvio();
