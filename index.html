@@ -347,7 +347,7 @@
           </label>
           <div class="campo corto">
             <label for="a-limite">Límite por archivo (MB)</label>
-            <input id="a-limite" type="number" min="1" max="200">
+            <input id="a-limite" type="number" min="1" max="2000">
           </div>
           <button id="a-guardar" class="btn" type="button">Guardar ajustes</button>
         </div>
@@ -717,6 +717,104 @@
   // El texto del aviso de pausa cambia si se pierde o vuelve la señal.
   ['online', 'offline'].forEach(n => window.addEventListener(n, () => { if (enCurso() && !st.enviando) pintarEnvio(); }));
 
+  // ---------- subida de archivos ----------
+  // Por partes (resumible): el motor abre una sesión de carga en Drive y el navegador sube trozos directo a Drive;
+  // tras un corte pregunta hasta dónde llegó y sigue desde ahí. Si no está disponible, usa el método anterior
+  // (todo el archivo en una llamada al motor, máximo 50 MB).
+  const TROZO = 8 * 1048576;          // múltiplo de 256 KB (lo exige Drive)
+  const MAX_SIN_PARTES = 50 * 1048576;
+
+  /** Sube el archivo a[i] y devuelve el nombre con que quedó en Drive. */
+  async function subirArchivo(a, id, ticket, i, total) {
+    if (!a.sinPartes) {
+      try { return await subirPorPartes(a, id, ticket, i, total); }
+      catch (e) {
+        if (!e.noDisponible || a.file.size > MAX_SIN_PARTES) throw e;
+        a.sinPartes = true; // se sigue con el método anterior
+      }
+    }
+    if (a.file.size > MAX_SIN_PARTES) throw new Error('Supera 50 MB y la subida por partes no está disponible.');
+    // Tiempo máximo según el tamaño: 2 min + 1 min por cada 3 MB (conexiones lentas).
+    const ms = 120000 + Math.ceil(a.file.size / 3145728) * 60000;
+    const b64 = await leerBase64(a.file);
+    const res = await conReintentos(() => llamar('api_subirEvidencia',
+      [st.codigo, id, ticket, a.indice, a.file.name, a.file.type, b64], ms),
+      'Subiendo ' + (i + 1) + ' de ' + total + ' (' + mb(a.file.size) + ')…', 5 + 90 * i / total);
+    return res.nombre;
+  }
+
+  /** PUT a la sesión de carga de Drive. Resuelve {status, rango, texto}; un corte de red rechaza con errorRed. */
+  function putDrive(url, cuerpo, rango, ms, alAvanzar) {
+    return new Promise((ok, mal) => {
+      const x = new XMLHttpRequest();
+      x.open('PUT', url);
+      x.setRequestHeader('Content-Range', rango);
+      x.timeout = ms;
+      if (alAvanzar && x.upload) x.upload.onprogress = ev => alAvanzar(ev.loaded);
+      x.onload = () => ok({ status: x.status, rango: x.getResponseHeader('Range'), texto: x.responseText });
+      x.onerror = () => mal(errorRed('Sin conexión con Google Drive.'));
+      x.ontimeout = () => mal(errorRed('Google Drive tardó demasiado en responder.'));
+      x.send(cuerpo);
+    });
+  }
+  /** Bytes que Drive ya tiene según el encabezado Range ("bytes=0-N"), o null si no lo informa. */
+  const bytesRecibidos = r => { const m = /-(\d+)$/.exec(r.rango || ''); return m ? Number(m[1]) + 1 : null; };
+
+  async function subirPorPartes(a, id, ticket, i, total) {
+    const tam = a.file.size;
+    const pct = b => 5 + 90 * (i + (tam ? b / tam : 1)) / total;
+    const txt = b => 'Subiendo ' + (i + 1) + ' de ' + total + ': ' + mb(b) + ' de ' + mb(tam) + '…';
+    return conReintentos(async () => {
+      if (!a.sesion) {
+        try {
+          const r = await api('api_iniciarSubida', st.codigo, id, ticket, a.indice, a.file.name, a.file.type, tam);
+          a.sesion = r.url; a.nombreFinal = r.nombre; a.enviado = 0; a.verificar = false;
+        } catch (e) {
+          if (/SUBIDA_NO_DISPONIBLE|^Acción no válida/.test(e.message)) e.noDisponible = true; // motor sin la función nueva
+          throw e;
+        }
+      }
+      if (a.verificar) {
+        // Después de un corte: Drive dice cuántos bytes recibió (o que el archivo ya está completo).
+        const r = await putDrive(a.sesion, null, 'bytes */' + tam, 30000);
+        if (r.status === 200 || r.status === 201) return a.nombreFinal;
+        if (r.status === 308) { const b = bytesRecibidos(r); a.enviado = b == null ? 0 : b; }
+        else return errorDrive(a, r);
+        a.verificar = false;
+      }
+      for (;;) {
+        const ini = a.enviado, fin = Math.min(ini + TROZO, tam);
+        progreso(pct(ini), txt(ini));
+        let r;
+        try {
+          r = await putDrive(a.sesion, tam ? a.file.slice(ini, fin) : null,
+            tam ? 'bytes ' + ini + '-' + (fin - 1) + '/' + tam : 'bytes */0', 180000,
+            b => progreso(pct(ini + b), txt(ini + b)));
+        } catch (e) {
+          a.verificar = true;
+          // Primer trozo de la página con señal: probablemente el navegador no puede subir directo a Drive.
+          if (ini === 0 && !st.partesOk && navigator.onLine !== false && tam <= MAX_SIN_PARTES) {
+            e.noDisponible = true; e.red = false;
+          }
+          throw e;
+        }
+        if (r.status === 200 || r.status === 201) { st.partesOk = true; return a.nombreFinal; }
+        if (r.status !== 308) return errorDrive(a, r);
+        st.partesOk = true;
+        const b = bytesRecibidos(r);
+        a.enviado = b == null ? fin : b;
+      }
+    }, txt(a.enviado || 0), pct(a.enviado || 0));
+  }
+  /** Respuesta inesperada de Drive: sesión vencida → se abre otra (una vez); errores del servidor → reintento. */
+  function errorDrive(a, r) {
+    if (r.status >= 500) { a.verificar = true; throw errorRed('Google Drive no respondió (' + r.status + ').'); }
+    if (!a.sesionRenovada) { a.sesionRenovada = true; a.sesion = null; throw errorRed('Se renovó la sesión de carga.'); }
+    let msg = '';
+    try { msg = JSON.parse(r.texto).error.message; } catch (e) { /* sin detalle */ }
+    throw new Error('Google Drive rechazó el archivo (' + r.status + (msg ? ': ' + msg : '') + ').');
+  }
+
   /** Hallazgo ya registrado con archivos por subir: bloquea el formulario y muestra cómo seguir. */
   function pintarEnvio() {
     const ec = enCurso();
@@ -796,14 +894,9 @@
         const a = lista[i];
         if (a.hecho || a.pendiente) continue;
         if (a.manual) { a.pendiente = true; a.estado = '⏳ Entrega manual (supera ' + st.datos.limiteMB + ' MB)'; pintarArchivos(); continue; }
-        const txt = 'Subiendo ' + (i + 1) + ' de ' + lista.length + ' (' + mb(a.file.size) + ')…';
-        // Tiempo máximo según el tamaño: 2 min + 1 min por cada 3 MB (conexiones lentas).
-        const ms = 120000 + Math.ceil(a.file.size / 3145728) * 60000;
         try {
-          const b64 = await leerBase64(a.file);
-          const res = await conReintentos(() => llamar('api_subirEvidencia',
-            [st.codigo, id, ticket, a.indice, a.file.name, a.file.type, b64], ms), txt, 5 + 90 * i / lista.length);
-          a.hecho = true; a.fallo = false; a.estado = '✓ ' + res.nombre;
+          const nombre = await subirArchivo(a, id, ticket, i, lista.length);
+          a.hecho = true; a.fallo = false; a.estado = '✓ ' + nombre;
         } catch (e) {
           if (e.red) { a.estado = '⏸ Sin subir (conexión)'; throw e; } // se reanuda con "Reintentar envío"
           a.pendiente = true; a.fallo = true; a.estado = '✗ No se pudo subir: ' + msgError(e);
