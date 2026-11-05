@@ -285,7 +285,7 @@
             <button id="btn-descartar-envio" class="btn btn-sec mini" type="button">Descartar</button>
           </div>
           <button id="btn-enviar" class="btn grande" type="submit">Enviar reporte</button>
-          <button id="btn-guardar-despues" class="btn btn-sec" type="button">📥 Sin señal: guardar para enviar después</button>
+          <button id="btn-guardar-despues" class="btn btn-sec" type="button">📥 Guardar para enviar después</button>
           <div id="progreso" class="progreso" hidden>
             <div class="barra-prog"><div id="barra-prog-in"></div></div>
             <p id="progreso-txt"></p>
@@ -915,6 +915,7 @@
   window.addEventListener('beforeunload', ev => { if (st.enviando || enCurso()) { ev.preventDefault(); ev.returnValue = ''; } });
   // El texto del aviso de pausa cambia si se pierde o vuelve la señal.
   ['online', 'offline'].forEach(n => window.addEventListener(n, () => {
+    textoGuardarDespues();
     if (enCurso() && !st.enviando) pintarEnvio();
     if (st.datos) pintarBandeja(n === 'online');
   }));
@@ -1209,6 +1210,12 @@
     if (enviados) toast('✓ ' + enviados + ' reporte(s) pendiente(s) enviado(s). Puedes verlos en "Consultar".');
   }
 
+  /** "Sin señal" solo cuando el celular de verdad no tiene conexión; con señal el botón es opcional. */
+  function textoGuardarDespues() {
+    $('btn-guardar-despues').textContent = navigator.onLine === false
+      ? '📶 Sin señal: guardar para enviar después' : '📥 Guardar para enviar después';
+  }
+
   /** Hallazgo ya registrado con archivos por subir: bloquea el formulario y muestra cómo seguir. */
   function pintarEnvio() {
     const ec = enCurso();
@@ -1216,6 +1223,7 @@
     // El aviso solo aparece si el envío quedó en pausa (no mientras se está subiendo).
     const pausa = ec && !st.enviando;
     $('btn-guardar-despues').hidden = st.enviando || !st.datos;
+    textoGuardarDespues();
     $('envio-pendiente').hidden = !pausa;
     if (!st.enviando) $('btn-enviar').textContent = pausa ? '🔁 Reintentar envío de ' + st.envio.id : 'Enviar reporte';
     if (pausa) {
