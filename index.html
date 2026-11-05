@@ -57,7 +57,7 @@
   .tarjeta.peligro { border-color: var(--error); }
   .tarjeta.peligro h2 { color: var(--error); }
   
-    .archivos { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 8px; }
+    .archivos { list-style: none; margin: 8px 0 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
     .archivo { display: flex; align-items: center; gap: 10px; border: 1px solid var(--borde); border-radius: 8px; padding: 6px; }
     .archivo.malo { border-color: var(--error); background: #fff4f2; }
   .archivo.manual { border-color: var(--aviso); background: #fff8eb; }
@@ -73,7 +73,7 @@
     .archivo .info { flex: 1; min-width: 0; font-size: .85rem; }
     .archivo .nombre { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .archivo .quitar { background: none; border: 0; font-size: 1.3rem; cursor: pointer; color: var(--gris); }
-    .archivo .estado-sub { font-size: .8rem; }
+    .archivo .estado-sub { font-size: .8rem; overflow-wrap: anywhere; }
   
     .progreso { margin-top: 12px; }
   .subir.desactivado { opacity: .45; pointer-events: none; }
@@ -767,7 +767,7 @@
       ul.appendChild(el('li', { class: 'archivo' + (a.malo ? ' malo' : a.manual || a.fallo ? ' manual' : '') }, [
         mini,
         el('div', { class: 'info' }, [
-          el('div', { class: 'nombre', text: (i + 1) + '. ' + a.file.name }),
+          el('div', { class: 'nombre', title: a.file.name, text: (i + 1) + '. ' + (a.captura ? '📷 Foto tomada con la app' : a.file.name) }),
           el('div', { class: 'estado-sub', text: nota }),
         ]),
         enCurso() ? null : el('button', { class: 'quitar', type: 'button', title: 'Quitar', text: '✕', onclick: () => {
