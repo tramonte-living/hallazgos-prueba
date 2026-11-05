@@ -714,19 +714,26 @@
   document.addEventListener('visibilitychange', () => { if (st.enviando && document.visibilityState === 'visible') pantallaEncendida(true); });
   // Enviando o con un envío a medias: el navegador pregunta antes de cerrar o recargar.
   window.addEventListener('beforeunload', ev => { if (st.enviando || enCurso()) { ev.preventDefault(); ev.returnValue = ''; } });
+  // El texto del aviso de pausa cambia si se pierde o vuelve la señal.
+  ['online', 'offline'].forEach(n => window.addEventListener(n, () => { if (enCurso() && !st.enviando) pintarEnvio(); }));
 
   /** Hallazgo ya registrado con archivos por subir: bloquea el formulario y muestra cómo seguir. */
   function pintarEnvio() {
     const ec = enCurso();
     $('f-reporte').querySelectorAll('select, input, textarea').forEach(x => { x.disabled = ec; });
     $('subir-archivos').classList.toggle('desactivado', ec);
-    $('envio-pendiente').hidden = !ec;
-    $('btn-enviar').textContent = ec ? '🔁 Reintentar envío de ' + st.envio.id : 'Enviar reporte';
-    if (ec) {
+    // El aviso solo aparece si el envío quedó en pausa (no mientras se está subiendo).
+    const pausa = ec && !st.enviando;
+    $('envio-pendiente').hidden = !pausa;
+    if (!st.enviando) $('btn-enviar').textContent = pausa ? '🔁 Reintentar envío de ' + st.envio.id : 'Enviar reporte';
+    if (pausa) {
       const faltan = st.archivos.filter(a => !a.hecho && !a.pendiente).length;
-      $('envio-pendiente-txt').textContent = '⚠️ El hallazgo ' + st.envio.id + ' ya quedó registrado' +
-        (faltan ? '; faltan ' + faltan + ' archivo(s) por subir.' : ', falta terminar el envío.') +
-        ' Cuando tenga señal pulse "Reintentar envío". No cierre ni recargue la página.';
+      const resta = faltan ? 'faltan ' + faltan + ' archivo(s) por subir.' : 'falta terminar el envío.';
+      $('envio-pendiente-txt').textContent = navigator.onLine === false
+        ? '📶 Sin señal. El hallazgo ' + st.envio.id + ' ya quedó registrado; ' + resta +
+          ' Cuando vuelva la señal pulse "Reintentar envío". No cierre ni recargue la página.'
+        : '⚠️ El envío del hallazgo ' + st.envio.id + ' se interrumpió (ya quedó registrado); ' + resta +
+          ' Pulse "Reintentar envío". No cierre ni recargue la página.';
       $('btn-terminar').hidden = !faltan;
     }
     pintarArchivos();
