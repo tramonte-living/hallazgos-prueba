@@ -81,6 +81,11 @@
   .botones-ev .subir { flex: 1 1 140px; text-align: center; }
   #ev-contador { font-weight: normal; color: var(--gris); }
   #envio-pendiente { margin: 10px 0; }
+  .bandeja { border: 2px solid var(--aviso); background: #fff8eb; }
+  .bandeja-cab { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+  .bandeja-cab b { font-size: .95rem; }
+  #bandeja-lista .archivo { background: #fff; }
+  #btn-guardar-despues { margin-top: 8px; width: 100%; }
     .barra-prog { height: 10px; background: #e3e9ef; border-radius: 6px; overflow: hidden; }
     #barra-prog-in { height: 100%; width: 0; background: var(--azul2); transition: width .3s; }
   
@@ -216,6 +221,14 @@
 
       <!-- Reportar -->
       <div id="t-reportar" class="panel">
+        <div id="bandeja" class="tarjeta bandeja" hidden>
+          <div class="bandeja-cab">
+            <b id="bandeja-txt"></b>
+            <button id="btn-enviar-pend" class="btn mini" type="button">📤 Enviar ahora</button>
+          </div>
+          <p class="ayuda" id="bandeja-ayuda">Guardados en este celular. No existen para la interventoría hasta que se envíen.</p>
+          <ul id="bandeja-lista" class="archivos"></ul>
+        </div>
         <form id="f-reporte" class="tarjeta" novalidate>
           <div class="campo" id="campo-libro">
             <label for="sel-libro">Torre / Libro</label>
@@ -272,6 +285,7 @@
             <button id="btn-descartar-envio" class="btn btn-sec mini" type="button">Descartar</button>
           </div>
           <button id="btn-enviar" class="btn grande" type="submit">Enviar reporte</button>
+          <button id="btn-guardar-despues" class="btn btn-sec" type="button">📥 Sin señal: guardar para enviar después</button>
           <div id="progreso" class="progreso" hidden>
             <div class="barra-prog"><div id="barra-prog-in"></div></div>
             <p id="progreso-txt"></p>
@@ -590,7 +604,8 @@
     $('u-temporal').hidden = true; $('a-reset-tarjeta').hidden = true;
     $('c-total').textContent = ''; $('c-buscar').value = '';
     $('u-buscar').value = ''; $('u-filtro').innerHTML = ''; $('u-total').textContent = ''; st.usuarios = null; st.uAbierto = null;
-    st.lista = []; st.archivos = []; st.envio = null;
+    st.lista = []; st.archivos = []; st.envio = null; st.actual = null; st.actualEnCola = false; st.actualCreado = null; st.sinBorrador = false;
+    $('bandeja').hidden = true; $('bandeja-lista').innerHTML = '';
     $('resultado').hidden = true; $('res-manual').hidden = true; $('f-reporte').hidden = false;
     $('in-ubicacion').value = ''; $('in-descripcion').value = ''; $('in-reporta').value = '';
   }
@@ -614,6 +629,7 @@
     opciones($('sel-categoria'), d.categorias, 'Seleccione…');
     fechaHoy();
     pintarEnvio();
+    recuperarDelCelular();
 
     opciones($('c-libro'), libros);
     if (s.libro) $('c-libro').value = s.libro;
@@ -659,6 +675,8 @@
   function zonasDeLibro(id) { const l = st.datos.libros.find(x => x.id === id); return l ? l.zonas : []; }
   function actualizarZonas() { opciones($('sel-zona'), zonasDeLibro($('sel-libro').value), 'Seleccione…'); }
   $('sel-libro').addEventListener('change', actualizarZonas);
+  $('f-reporte').addEventListener('input', () => guardarBorrador());
+  $('f-reporte').addEventListener('change', () => guardarBorrador());
 
   const maxEvidencias = () => st.datos.maxEvidencias || 5;
   function agregarArchivos(files, captura) {
@@ -780,6 +798,7 @@
   }
 
   function pintarArchivos() {
+    guardarBorrador();
     const ul = $('lista-archivos'); ul.innerHTML = '';
     const limite = st.datos.limiteMB * 1048576, max = maxEvidencias(), lleno = st.archivos.length >= max;
     $('max-ev').textContent = max;
@@ -860,7 +879,10 @@
   // Enviando o con un envío a medias: el navegador pregunta antes de cerrar o recargar.
   window.addEventListener('beforeunload', ev => { if (st.enviando || enCurso()) { ev.preventDefault(); ev.returnValue = ''; } });
   // El texto del aviso de pausa cambia si se pierde o vuelve la señal.
-  ['online', 'offline'].forEach(n => window.addEventListener(n, () => { if (enCurso() && !st.enviando) pintarEnvio(); }));
+  ['online', 'offline'].forEach(n => window.addEventListener(n, () => {
+    if (enCurso() && !st.enviando) pintarEnvio();
+    if (st.datos) pintarBandeja(n === 'online');
+  }));
 
   // ---------- subida de archivos ----------
   // Por partes (resumible): el motor abre una sesión de carga en Drive y el navegador sube trozos directo a Drive;
@@ -961,12 +983,204 @@
     throw new Error('Google Drive rechazó el archivo (' + r.status + (msg ? ': ' + msg : '') + ').');
   }
 
+  // ---------- borrador y bandeja de salida (guardados en el celular) ----------
+  // El reporte que se está llenando se guarda solo (si la página se recarga, p. ej. al volver de la cámara, se
+  // recupera). "Guardar para enviar después" lo pasa a la bandeja; con señal se envían uno por uno con el flujo normal.
+  // IndexedDB: 'reportes' (datos del formulario y estado del envío) y 'archivos' (cada foto/video una sola vez).
+  const BD_NOMBRE = 'hz_bandeja_prueba';
+  let bdPromesa = null;
+  function bd() {
+    if (!bdPromesa) bdPromesa = new Promise((ok, mal) => {
+      if (!window.indexedDB) return mal(new Error('Este navegador no permite guardar reportes en el celular.'));
+      const r = indexedDB.open(BD_NOMBRE, 1);
+      r.onupgradeneeded = () => {
+        r.result.createObjectStore('reportes', { keyPath: 'clave' });
+        r.result.createObjectStore('archivos', { keyPath: 'fid' });
+      };
+      r.onsuccess = () => ok(r.result);
+      r.onerror = () => mal(r.error);
+    });
+    return bdPromesa;
+  }
+  /** Ejecuta fn(tienda...) en una transacción; resuelve con el resultado de la última petición. */
+  async function bdTx(tiendas, modo, fn) {
+    const db = await bd();
+    return new Promise((ok, mal) => {
+      const tx = db.transaction(tiendas, modo);
+      let req = fn.apply(null, tiendas.map(t => tx.objectStore(t)));
+      tx.oncomplete = () => ok(req && req.result);
+      tx.onerror = () => mal(tx.error); tx.onabort = () => mal(tx.error || new Error('No se pudo guardar en el celular.'));
+    });
+  }
+  const misReportes = () => bdTx(['reportes'], 'readonly', r => r.getAll())
+    .then(l => l.filter(x => x.usuarioId === st.datos.sesion.usuarioId)).catch(() => []);
+  async function bdQuitarReporte(clave) {
+    try {
+      await bdTx(['reportes', 'archivos'], 'readwrite', (r, a) => {
+        const req = r.get(clave);
+        req.onsuccess = () => { if (req.result) (req.result.fids || []).forEach(f => a.delete(f)); r.delete(clave); };
+        return req;
+      });
+    } catch (e) { /* sin almacenamiento */ }
+  }
+  function claveBorrador() { if (!st.actual) st.actual = claveAleatoria(); return st.actual; }
+  const formularioConDatos = () => !!(st.archivos.length || $('in-descripcion').value.trim() || $('in-ubicacion').value.trim() || st.envio);
+
+  let relojBorrador = null;
+  /** Guarda el formulario en el celular (agrupa cambios seguidos). */
+  function guardarBorrador() {
+    if (!st.datos || st.sinBorrador) return;
+    clearTimeout(relojBorrador);
+    relojBorrador = setTimeout(guardarBorradorYa, 700);
+  }
+  async function guardarBorradorYa() {
+    clearTimeout(relojBorrador);
+    if (!st.datos || st.sinBorrador) return;
+    if (!formularioConDatos()) { // formulario vacío: no hay nada que recuperar
+      if (st.actual && !st.actualEnCola) { const c = st.actual; st.actual = null; await bdQuitarReporte(c); }
+      return;
+    }
+    const clave = claveBorrador();
+    const nuevos = st.archivos.filter(a => !a.fid || a.fidDe !== a.file);
+    nuevos.forEach(a => { a.fid = claveAleatoria(); a.fidDe = a.file; });
+    const rec = {
+      clave, usuarioId: st.datos.sesion.usuarioId, enCola: !!st.actualEnCola, creado: st.actualCreado || Date.now(),
+      guardado: Date.now(), datos: leerFormulario(), envio: st.envio ? Object.assign({}, st.envio) : null,
+      fids: st.archivos.map(a => a.fid),
+      archivos: st.archivos.map(a => ({
+        fid: a.fid, nombre: a.file.name, tipo: a.file.type, tam: a.file.size,
+        captura: a.captura ? Object.assign({}, a.captura, { fecha: +a.captura.fecha }) : null,
+        indice: a.indice, hecho: !!a.hecho, pendiente: !!a.pendiente, fallo: !!a.fallo, estado: a.estado || '',
+        sesion: a.sesion || null, enviado: a.enviado || 0, nombreFinal: a.nombreFinal || '', info: a.info || '',
+        preparada: !!a.preparada, sinPartes: !!a.sinPartes, verificar: !!a.verificar,
+      })),
+    };
+    st.actualCreado = rec.creado;
+    try {
+      await bdTx(['reportes', 'archivos'], 'readwrite', (r, ar) => {
+        nuevos.forEach(a => ar.put({ fid: a.fid, blob: a.file }));
+        const previo = r.get(clave);
+        previo.onsuccess = () => {
+          (previo.result && previo.result.fids || []).filter(f => rec.fids.indexOf(f) < 0).forEach(f => ar.delete(f));
+          r.put(rec);
+        };
+        return previo;
+      });
+    } catch (e) {
+      nuevos.forEach(a => { a.fid = null; }); // se reintenta en el próximo guardado
+      if (!st.avisoSinEspacio) { st.avisoSinEspacio = true; toast('⚠️ No se pudo guardar una copia en el celular (' + msgError(e) + ').', true); }
+    }
+  }
+  /** Tras un envío completo: la copia ya no hace falta. */
+  function borradorEnviado() {
+    const c = st.actual;
+    st.sinBorrador = true; st.actual = null; st.actualEnCola = false; st.actualCreado = null; clearTimeout(relojBorrador);
+    if (c) bdQuitarReporte(c).then(pintarBandeja);
+  }
+  /** Pone en el formulario un reporte guardado. */
+  async function cargarEnFormulario(rec) {
+    const blobs = await bdTx(['archivos'], 'readonly', a => a.getAll());
+    const porFid = {}; blobs.forEach(b => { porFid[b.fid] = b.blob; });
+    st.archivos.forEach(a => a.url && URL.revokeObjectURL(a.url));
+    const d = rec.datos || {};
+    if (st.datos.libros.some(l => l.id === d.libro)) { $('sel-libro').value = d.libro; actualizarZonas(); }
+    $('sel-zona').value = d.zona || ''; $('sel-categoria').value = d.categoria || '';
+    $('in-fecha').value = d.fechaReporte || hoyISO(); $('in-ubicacion').value = d.ubicacion || '';
+    $('in-descripcion').value = d.descripcion || ''; $('in-reporta').value = d.reportadoPor || '';
+    st.archivos = rec.archivos.filter(x => porFid[x.fid]).map(x => {
+      const b = porFid[x.fid];
+      const file = b instanceof File && b.name ? b : new File([b], x.nombre, { type: x.tipo });
+      return Object.assign({}, x, { file, fidDe: file, url: /^image\//.test(x.tipo) ? URL.createObjectURL(file) : null,
+        verificar: !!(x.sesion && !x.hecho), // subida a medias: se pregunta a Drive cuánto recibió
+        captura: x.captura ? Object.assign({}, x.captura, { fecha: new Date(x.captura.fecha), fija: true }) : null });
+    });
+    const perdidos = rec.archivos.length - st.archivos.length;
+    st.envio = rec.envio || null;
+    st.actual = rec.clave; st.actualEnCola = !!rec.enCola; st.actualCreado = rec.creado; st.sinBorrador = false;
+    pintarEnvio();
+    if (perdidos) toast('⚠️ ' + perdidos + ' archivo(s) de este reporte ya no estaban guardados en el celular.', true);
+  }
+  /** Al entrar: recupera el reporte que se estaba llenando y muestra la bandeja. */
+  async function recuperarDelCelular() {
+    const lista = await misReportes();
+    const borrador = lista.filter(r => !r.enCola).sort((a, b) => b.guardado - a.guardado)[0];
+    if (borrador && !formularioConDatos()) {
+      try { await cargarEnFormulario(borrador); toast('💾 Se recuperó el reporte que estabas llenando.'); }
+      catch (e) { /* sin almacenamiento */ }
+    }
+    pintarBandeja();
+  }
+  async function guardarParaDespues(sinSenal) {
+    st.actualEnCola = true;
+    await guardarBorradorYa();
+    if (!st.actual) return; // no se pudo guardar (ya se avisó)
+    if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+    reiniciarFormulario();
+    $('resultado').hidden = true; $('f-reporte').hidden = false;
+    await pintarBandeja();
+    toast((sinSenal ? '📶 Sin señal: ' : '') + '📥 Guardado en pendientes. Envíalo con "📤 Enviar ahora" cuando tengas señal.');
+    window.scrollTo(0, 0);
+  }
+  async function pintarBandeja(volvioSenal) {
+    if (!st.datos) return;
+    const cola = (await misReportes()).filter(r => r.enCola && r.clave !== (st.actualEnCola ? st.actual : '')).sort((a, b) => a.creado - b.creado);
+    const ul = $('bandeja-lista'); ul.innerHTML = '';
+    $('bandeja').hidden = !cola.length;
+    if (!cola.length) return;
+    const bytes = cola.reduce((t, r) => t + r.archivos.reduce((u, x) => u + (x.tam || 0), 0), 0);
+    $('bandeja-txt').textContent = '📤 ' + cola.length + ' reporte(s) pendiente(s) de envío · ' + mb(bytes);
+    $('btn-enviar-pend').disabled = !!(st.enviando || st.enviandoBandeja);
+    cola.forEach(r => {
+      const d = r.datos || {}, n = r.archivos.length;
+      ul.appendChild(el('li', { class: 'archivo' }, [
+        el('div', { class: 'mini', text: n ? '📷' : '📝' }),
+        el('div', { class: 'info' }, [
+          el('div', { class: 'nombre', text: (d.zona || '¿zona?') + ' · ' + (d.categoria || '¿categoría?') + (r.envio && r.envio.id ? ' · ' + r.envio.id : '') }),
+          el('div', { class: 'estado-sub', text: n + ' archivo(s) · guardado ' + fechaHora(new Date(r.creado)) +
+            (d.descripcion ? ' · ' + d.descripcion.slice(0, 60) : '') }),
+        ]),
+        el('button', { class: 'quitar', type: 'button', title: 'Eliminar', text: '🗑️', onclick: async () => {
+          if (!confirm('¿Eliminar este reporte pendiente del celular? ' + (r.envio && r.envio.id
+            ? 'El hallazgo ' + r.envio.id + ' ya está registrado como "Incompleto".' : 'No se enviará.'))) return;
+          await bdQuitarReporte(r.clave); pintarBandeja();
+        } }),
+      ]));
+    });
+    if (volvioSenal) toast('📶 Volvió la señal: tienes ' + cola.length + ' reporte(s) pendiente(s). Pulsa "📤 Enviar ahora".');
+  }
+  $('btn-enviar-pend').addEventListener('click', enviarPendientes);
+  async function enviarPendientes() {
+    if (st.enviando || st.enviandoBandeja) return;
+    if (navigator.onLine === false) return toast('Sin señal todavía: inténtalo cuando vuelva.', true);
+    if (formularioConDatos() && !st.actualEnCola && $('resultado').hidden) {
+      if (!confirm('Tienes un reporte en el formulario sin enviar: se guardará en pendientes y se enviarán todos. ¿Continuar?')) return;
+      st.actualEnCola = true; await guardarBorradorYa();
+    }
+    st.enviandoBandeja = true;
+    let enviados = 0;
+    try {
+      for (;;) {
+        const cola = (await misReportes()).filter(r => r.enCola).sort((a, b) => a.creado - b.creado);
+        if (!cola.length) break;
+        reiniciarFormulario();
+        $('resultado').hidden = true; $('res-manual').hidden = true; $('f-reporte').hidden = false;
+        await cargarEnFormulario(cola[0]);
+        await pintarBandeja();
+        toast('📤 Enviando pendiente ' + (enviados + 1) + ' de ' + (enviados + cola.length) + '…');
+        if (!(await enviar())) break; // en pausa o con error: queda en el formulario ("Reintentar envío")
+        enviados++;
+      }
+    } finally { st.enviandoBandeja = false; pintarBandeja(); }
+    if (enviados) toast('✓ ' + enviados + ' reporte(s) pendiente(s) enviado(s). Puedes verlos en "Consultar".');
+  }
+
   /** Hallazgo ya registrado con archivos por subir: bloquea el formulario y muestra cómo seguir. */
   function pintarEnvio() {
     const ec = enCurso();
     $('f-reporte').querySelectorAll('select, input, textarea').forEach(x => { x.disabled = ec; });
     // El aviso solo aparece si el envío quedó en pausa (no mientras se está subiendo).
     const pausa = ec && !st.enviando;
+    $('btn-guardar-despues').hidden = st.enviando || !st.datos;
     $('envio-pendiente').hidden = !pausa;
     if (!st.enviando) $('btn-enviar').textContent = pausa ? '🔁 Reintentar envío de ' + st.envio.id : 'Enviar reporte';
     if (pausa) {
@@ -991,22 +1205,29 @@
     };
   }
 
+  /** Revisa el formulario antes de enviar o guardar; devuelve false (con aviso) si falta algo. */
+  function formularioValido(verbo) {
+    const datos = leerFormulario();
+    const error = !datos.zona ? 'Seleccione el piso / zona.' : !datos.fechaReporte ? 'Indique la fecha del reporte.'
+      : datos.fechaReporte > hoyISO() ? 'La fecha del reporte no puede ser futura.' : !datos.categoria ? 'Seleccione la categoría.'
+      : !datos.descripcion ? 'Escriba la descripción.'
+      : st.archivos.length > maxEvidencias() ? 'Máximo ' + maxEvidencias() + ' fotos o videos por hallazgo: quite ' + (st.archivos.length - maxEvidencias()) + '.'
+      : st.archivos.some(a => a.malo) ? 'Quite los archivos marcados en rojo (solo fotos o videos).' : '';
+    if (error) { toast(error, true); return false; }
+    return !!st.archivos.length || confirm('¿' + verbo + ' el reporte sin fotos ni videos?');
+  }
   $('f-reporte').addEventListener('submit', ev => {
     ev.preventDefault();
     if (st.enviando) return;
-    if (!enCurso()) {
-      const datos = leerFormulario();
-      if (!datos.zona) return toast('Seleccione el piso / zona.', true);
-      if (!datos.fechaReporte) return toast('Indique la fecha del reporte.', true);
-      if (datos.fechaReporte > hoyISO()) return toast('La fecha del reporte no puede ser futura.', true);
-      if (!datos.categoria) return toast('Seleccione la categoría.', true);
-      if (!datos.descripcion) return toast('Escriba la descripción.', true);
-      if (st.archivos.length > maxEvidencias()) return toast('Máximo ' + maxEvidencias() + ' fotos o videos por hallazgo: quite ' +
-        (st.archivos.length - maxEvidencias()) + '.', true);
-      if (st.archivos.some(a => a.malo)) return toast('Quite los archivos marcados en rojo (solo fotos o videos).', true);
-      if (!st.archivos.length && !confirm('¿Enviar el reporte sin fotos ni videos?')) return;
-    }
+    if (!enCurso() && !formularioValido('Enviar')) return;
+    // Sin señal: en vez de esperar, se guarda en la bandeja.
+    if (navigator.onLine === false && !st.enviandoBandeja) return guardarParaDespues(true);
     enviar();
+  });
+  $('btn-guardar-despues').addEventListener('click', () => {
+    if (st.enviando) return;
+    if (!enCurso() && !formularioValido('Guardar')) return;
+    guardarParaDespues(false);
   });
   $('btn-terminar').addEventListener('click', () => {
     if (st.enviando || !enCurso()) return;
@@ -1018,23 +1239,25 @@
     if (st.enviando || !enCurso()) return;
     if (!confirm('¿Descartar este envío? El hallazgo ' + st.envio.id + ' queda registrado como "Incompleto" y las fotos que ' +
       'falten deberá entregarlas al administrador.')) return;
-    reiniciarFormulario();
+    reiniciarFormulario({ borrar: true });
   });
 
+  /** Envía el reporte del formulario. Devuelve true si terminó (registrado y finalizado). */
   async function enviar() {
+    let exito = false;
     const btn = $('btn-enviar'); btn.disabled = true; btn.classList.add('ocupado'); $('btn-terminar').disabled = true;
     st.enviando = true; pantallaEncendida(true);
     btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
     try {
-      // La clave se crea una vez por reporte; los reintentos reenvían la misma.
-      if (!st.envio) st.envio = { clave: claveAleatoria() };
+      // La clave se crea una vez por reporte (es la misma del borrador); los reintentos reenvían la misma.
+      if (!st.envio) st.envio = { clave: claveBorrador() };
       if (!st.envio.id) {
         const datos = leerFormulario();
         datos.nArchivos = st.archivos.length; datos.claveEnvio = st.envio.clave;
         st.archivos.forEach((a, i) => { a.indice = i + 1; });
         const r = await conReintentos(() => api('api_crearHallazgo', st.codigo, datos), 'Registrando hallazgo…', 3);
         st.envio.id = r.id; st.envio.ticket = r.ticket;
-        pintarEnvio();
+        pintarEnvio(); guardarBorradorYa();
       }
       const id = st.envio.id, ticket = st.envio.ticket, lista = st.archivos;
       for (let i = 0; i < lista.length; i++) {
@@ -1053,7 +1276,8 @@
       const pendientes = lista.filter(a => a.pendiente).map(a => ({ indice: a.indice, original: a.file.name, mime: a.file.type }));
       const fin = await conReintentos(() => api('api_finalizarHallazgo', st.codigo, id, ticket, pendientes), 'Finalizando…', 97);
       progreso(100, 'Listo');
-      st.envio = null; gpsApagar();
+      st.envio = null; gpsApagar(); exito = true;
+      borradorEnviado();
       $('res-id').textContent = id;
       $('res-detalle').textContent = fin.evidencias + ' evidencia(s) guardada(s).';
       mostrarManual(fin);
@@ -1067,9 +1291,14 @@
       pintarEnvio();
       if (enCurso()) $('envio-pendiente').scrollIntoView({ behavior: 'smooth', block: 'center' });
       setTimeout(() => { $('progreso').hidden = true; }, 800);
+      if (!exito) guardarBorradorYa();
     }
+    return exito;
   }
-  function reiniciarFormulario() {
+  /** op.borrar: elimina también la copia guardada en el celular (si no, queda donde estaba: bandeja o nada). */
+  function reiniciarFormulario(op) {
+    if (op && op.borrar && st.actual) bdQuitarReporte(st.actual).then(pintarBandeja);
+    st.actual = null; st.actualEnCola = false; st.actualCreado = null; st.sinBorrador = false;
     st.archivos.forEach(a => a.url && URL.revokeObjectURL(a.url));
     st.archivos = []; st.envio = null; gpsApagar();
     $('in-ubicacion').value = ''; $('in-descripcion').value = ''; $('sel-categoria').value = ''; $('in-reporta').value = '';
@@ -1097,6 +1326,7 @@
 
   $('btn-otro').addEventListener('click', () => {
     reiniciarFormulario();
+    pintarBandeja();
     $('resultado').hidden = true; $('res-manual').hidden = true; $('f-reporte').hidden = false;
   });
 
