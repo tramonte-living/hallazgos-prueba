@@ -441,7 +441,8 @@
   const API_URL = 'https://script.google.com/macros/s/AKfycbxonnSoJLmaazla-p6yqDdr1AvRuJ9h2gdMniqX9-MesadREJWax7nSOeMt-x4Xx0zz/exec'; // publicar.py lo reemplaza según el ambiente
   const ES_PRUEBA = true;
   // Tiempo máximo de espera de las llamadas del envío (las demás esperan lo que tome el servidor).
-  const TIEMPO_MAX = { api_crearHallazgo: 90000, api_finalizarHallazgo: 90000 };
+  // api_inicio: con señal muy débil (sótano) se entra con los datos guardados en vez de quedarse cargando.
+  const TIEMPO_MAX = { api_inicio: 15000, api_crearHallazgo: 90000, api_finalizarHallazgo: 90000 };
   function api(fn) { return llamar(fn, Array.prototype.slice.call(arguments, 1), TIEMPO_MAX[fn]); }
   /** Error de conexión (sin señal, tiempo agotado o respuesta cortada): se puede reintentar. */
   function errorRed(msg) { const e = new Error(msg); e.red = true; return e; }
@@ -523,30 +524,64 @@
     try {
       const d = await api('api_inicio', token || '');
       if (d.necesitaIngreso) {
-        localStorage.removeItem(LS_CODIGO);
+        localStorage.removeItem(LS_CODIGO); localStorage.removeItem(LS_DATOS);
         vista('v-ingreso');
         return;
       }
       entrar(d);
     } catch (e) {
-      localStorage.removeItem(LS_CODIGO);
+      // Sin conexión (sótano): se entra con los datos de la última vez; la sesión NO se borra.
+      const guardados = e.red && datosGuardados(token);
+      if (guardados) return entrar(guardados, true);
+      if (!e.red) localStorage.removeItem(LS_CODIGO);
       vista('v-ingreso');
-      mostrarIngresoMsg(msgError(e));
+      mostrarIngresoMsg(e.red ? 'Sin conexión. Cuando tengas señal, recarga la página.' : msgError(e));
     }
   }
-  /** d: respuesta de api_inicio / api_ingresar / api_cambiarClave. */
-  function entrar(d) {
+  // Datos para usar la página sin conexión: solo lo que necesita el formulario (nada de administración).
+  const LS_DATOS = 'hz_datos_prueba';
+  const CAMPOS_SIN_CONEXION = ['sesion', 'libros', 'categorias', 'estados', 'limiteMB', 'maxEvidencias', 'camara', 'marcaAgua'];
+  function guardarDatos(d) {
+    const o = {}; CAMPOS_SIN_CONEXION.forEach(k => { o[k] = d[k]; });
+    try { localStorage.setItem(LS_DATOS, JSON.stringify(o)); } catch (e) { /* sin espacio: se sigue */ }
+  }
+  function datosGuardados(token) {
+    try {
+      const d = JSON.parse(localStorage.getItem(LS_DATOS) || 'null');
+      return d && token && d.sesion && d.sesion.token === token ? d : null;
+    } catch (e) { return null; }
+  }
+  /** d: respuesta de api_inicio / api_ingresar / api_cambiarClave (o los datos guardados, sinConexion). */
+  function entrar(d, sinConexion) {
     st.codigo = d.sesion.token;
     localStorage.setItem(LS_CODIGO, st.codigo);
-    st.datos = d;
+    st.datos = d; st.sinConexion = !!sinConexion;
+    if (!sinConexion && !d.sesion.debeCambiar) guardarDatos(d);
     $('in-clave').value = '';
     mostrarIngresoMsg('');
     montarApp();
+    if (sinConexion) {
+      $('tab-admin').hidden = true;
+      toast('📶 Sin conexión: usando los datos de tu última visita. Puedes reportar y guardar para enviar después.');
+    }
     if (d.sesion.debeCambiar) abrirCambioClave(true);
     else vista('v-app');
   }
+  /** Al volver la señal tras entrar sin conexión: actualiza los datos y revisa la sesión sin borrar el formulario. */
+  async function reconectar() {
+    if (!st.sinConexion || !st.codigo) return;
+    try {
+      const d = await api('api_inicio', st.codigo);
+      if (d.necesitaIngreso) return sesionVencida('Tu sesión venció. Ingresa de nuevo (tus reportes pendientes siguen guardados).');
+      st.sinConexion = false;
+      Object.assign(st.datos, d); guardarDatos(d);
+      $('tab-admin').hidden = d.sesion.rol !== 'ADMIN';
+      if (d.ajustes && !formularioConDatos()) montarApp(); // admin: llena Admin (con un reporte a medias, al recargar)
+    } catch (e) { /* sigue sin conexión */ }
+  }
+  window.addEventListener('online', reconectar);
   function sesionVencida(msg) {
-    localStorage.removeItem(LS_CODIGO);
+    localStorage.removeItem(LS_CODIGO); localStorage.removeItem(LS_DATOS);
     st.codigo = ''; st.datos = null;
     $('usuario').hidden = true; $('in-clave').value = '';
     vista('v-ingreso'); mostrarIngresoMsg(msg);
@@ -590,7 +625,7 @@
   });
   $('btn-salir').addEventListener('click', () => {
     if (st.codigo) api('api_salir', st.codigo).catch(() => {});
-    localStorage.removeItem(LS_CODIGO);
+    localStorage.removeItem(LS_CODIGO); localStorage.removeItem(LS_DATOS);
     st.codigo = ''; st.datos = null;
     $('usuario').hidden = true; $('in-clave').value = ''; mostrarIngresoMsg('');
     iniciar('');
@@ -1615,6 +1650,8 @@
 
   $('banner-prueba').hidden = !ES_PRUEBA;
   iniciar(localStorage.getItem(LS_CODIGO) || '');
+  // Modo sin conexión: guarda una copia de la página para poder abrirla sin señal.
+  if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('sw.js').catch(() => {});
 })();
 </script>
 </body>
