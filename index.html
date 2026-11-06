@@ -91,6 +91,10 @@
   
     .exito { text-align: center; }
     .check { font-size: 2.5rem; }
+    .tabla-est { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: .95rem; }
+    .tabla-est th, .tabla-est td { padding: 7px 6px; border-bottom: 1px solid var(--borde); text-align: left; }
+    .tabla-est th:last-child, .tabla-est td:last-child { text-align: right; }
+    .tabla-est .sin { color: #667085; }
     .id-grande { font-size: 1.6rem; font-weight: 700; color: var(--azul); letter-spacing: 1px; margin: 6px 0; }
   
     .hallazgo { background: #fff; border: 1px solid var(--borde); border-radius: 12px; padding: 12px; margin-bottom: 10px; }
@@ -332,6 +336,20 @@
 
       <!-- Admin -->
       <div id="t-admin" class="panel" hidden>
+        <div class="tarjeta">
+          <h2>📊 Estadísticas</h2>
+          <div class="campo">
+            <label for="e-libro">Libro</label>
+            <select id="e-libro"></select>
+          </div>
+          <p id="e-resumen"></p>
+          <table class="tabla-est">
+            <thead><tr><th>Piso / Zona</th><th>Hallazgos</th></tr></thead>
+            <tbody id="e-filas"></tbody>
+          </table>
+          <p id="e-info" class="ayuda"></p>
+          <button id="e-actualizar" class="btn btn-sec" type="button">🔄 Actualizar</button>
+        </div>
         <div class="tarjeta">
           <h2>Usuarios</h2>
           <div class="u-filtros">
@@ -635,8 +653,8 @@
   function limpiarPantalla() {
     document.querySelectorAll('.tab').forEach(x => x.classList.toggle('activa', x.dataset.tab === 'reportar'));
     ['reportar', 'consultar', 'admin'].forEach(t => { $('t-' + t).hidden = t !== 'reportar'; });
-    ['c-lista', 'c-enlaces', 'ctl-info', 'u-lista', 'a-enlaces', 'u-temporal', 'lista-archivos'].forEach(id => { $(id).innerHTML = ''; });
-    $('u-temporal').hidden = true; $('a-reset-tarjeta').hidden = true;
+    ['c-lista', 'c-enlaces', 'ctl-info', 'u-lista', 'a-enlaces', 'u-temporal', 'lista-archivos', 'e-libro', 'e-filas', 'e-resumen', 'e-info'].forEach(id => { $(id).innerHTML = ''; });
+    $('u-temporal').hidden = true; $('a-reset-tarjeta').hidden = true; st.estad = null;
     $('c-total').textContent = ''; $('c-buscar').value = '';
     $('u-buscar').value = ''; $('u-filtro').innerHTML = ''; $('u-total').textContent = ''; st.usuarios = null; st.uAbierto = null;
     st.lista = []; st.archivos = []; st.envio = null; st.actual = null; st.actualEnCola = false; st.actualCreado = null; st.sinBorrador = false;
@@ -704,6 +722,7 @@
     document.querySelectorAll('.tab').forEach(x => x.classList.toggle('activa', x === b));
     ['reportar', 'consultar', 'admin'].forEach(t => { $('t-' + t).hidden = t !== b.dataset.tab; });
     if (b.dataset.tab === 'consultar') cargarLista();
+    if (b.dataset.tab === 'admin' && !st.estad) cargarEstadisticas();
   }));
 
   // ---------- reportar ----------
@@ -1661,12 +1680,32 @@
       } catch (e) { toast(msgError(e), true); }
     });
   });
+  async function cargarEstadisticas(forzar) {
+    $('e-info').textContent = 'Cargando estadísticas…';
+    try { st.estad = await api('api_estadisticas', st.codigo, !!forzar); pintarEstadisticas(); }
+    catch (e) { $('e-info').textContent = 'No se pudieron cargar: ' + msgError(e); }
+  }
+  function pintarEstadisticas() {
+    const sel = $('e-libro'), elegido = sel.value;
+    sel.replaceChildren(...st.estad.libros.map(l => el('option', { value: l.id, text: l.nombre })));
+    if (elegido) sel.value = elegido;
+    const libro = st.estad.libros.find(l => l.id === sel.value) || st.estad.libros[0];
+    if (!libro) return;
+    const con = libro.zonas.filter(z => z.n).length, total = libro.zonas.reduce((s, z) => s + z.n, 0);
+    $('e-resumen').replaceChildren(el('b', { text: libro.nombre + ': ' + total + ' hallazgo(s) · ' + con + ' de ' +
+      libro.zonas.length + ' zonas con reportes · ' + (libro.zonas.length - con) + ' sin reportes' }));
+    $('e-filas').replaceChildren(...libro.zonas.map(z => el('tr', z.n ? {} : { class: 'sin' }, [
+      el('td', { text: z.nombre }), el('td', { text: z.n ? String(z.n) : '⚪ Sin reportes' })])));
+    $('e-info').textContent = 'Actualizado: ' + st.estad.actualizado + '. No cuenta Duplicado ni Anulado.';
+  }
+  $('e-libro').addEventListener('change', pintarEstadisticas);
+  $('e-actualizar').addEventListener('click', ev => conEspera(ev.currentTarget, 'Actualizando…', () => cargarEstadisticas(true)));
   $('ctl-actualizar').addEventListener('click', ev => conEspera(ev.currentTarget, 'Actualizando… (puede tardar)', async () => {
     try { const c = await api('api_actualizarControl', st.codigo); st.datos.control = c; pintarControl(c); toast('Control general actualizado'); }
     catch (e) { toast(msgError(e), true); }
   }));
   $('a-recargar').addEventListener('click', ev => conEspera(ev.currentTarget, 'Recargando…', async () => {
-    try { await api('api_recargarConfig', st.codigo); toast('Configuración recargada'); iniciar(st.codigo); }
+    try { await api('api_recargarConfig', st.codigo); toast('Configuración recargada'); iniciar(st.codigo); cargarEstadisticas(); }
     catch (e) { toast(msgError(e), true); }
   }));
 

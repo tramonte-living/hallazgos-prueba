@@ -1,7 +1,7 @@
 // Service worker: permite abrir la página sin señal (sótanos). Primero intenta la red (para recibir siempre la
 // versión nueva); si no hay conexión o tarda, usa la copia guardada de la última visita.
 // Solo toca la página misma: las llamadas al motor y a Drive pasan directo.
-const CACHE = 'hallazgos-e08f7f42dc1f';
+const CACHE = 'hallazgos-b339498970d8';
 const ESPERA_RED = 6000; // ms: con señal muy débil se usa la copia guardada
 
 self.addEventListener('install', ev => {
