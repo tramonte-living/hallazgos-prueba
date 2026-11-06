@@ -294,8 +294,8 @@
 
         <div id="resultado" class="tarjeta exito" hidden>
           <div class="check">✅</div>
-          <p>Hallazgo registrado</p>
-          <p class="id-grande" id="res-id"></p>
+          <p id="res-titulo">Hallazgo registrado</p>
+          <div class="id-grande" id="res-id"></div>
           <p id="res-detalle" class="ayuda"></p>
           <div id="res-manual" class="aviso-manual" hidden></div>
           <button id="btn-otro" class="btn" type="button">Reportar otro</button>
@@ -1192,7 +1192,7 @@
       if (!confirm('Tienes un reporte en el formulario sin enviar: se guardará en pendientes y se enviarán todos. ¿Continuar?')) return;
       st.actualEnCola = true; await guardarBorradorYa();
     }
-    st.enviandoBandeja = true;
+    st.enviandoBandeja = true; st.fines = [];
     let enviados = 0;
     try {
       for (;;) {
@@ -1207,7 +1207,8 @@
         enviados++;
       }
     } finally { st.enviandoBandeja = false; pintarBandeja(); }
-    if (enviados) toast('✓ ' + enviados + ' reporte(s) pendiente(s) enviado(s). Puedes verlos en "Consultar".');
+    if (enviados) toast('✓ ' + enviados + ' reporte(s) pendiente(s) enviado(s): ' + st.fines.map(f => f.id).join(', ') +
+      '. Puedes verlos en "Consultar".');
   }
 
   /** "Sin señal" solo cuando el celular de verdad no tiene conexión; con señal el botón es opcional. */
@@ -1321,9 +1322,10 @@
       progreso(100, 'Listo');
       st.envio = null; gpsApagar(); exito = true;
       borradorEnviado();
-      $('res-id').textContent = id;
-      $('res-detalle').textContent = fin.evidencias + ' evidencia(s) guardada(s).';
-      mostrarManual(fin);
+      // Al enviar los pendientes, la pantalla final muestra todos los ID registrados en la tanda.
+      const res = Object.assign({}, fin, { id });
+      st.fines = st.enviandoBandeja ? (st.fines || []).concat(res) : [res];
+      mostrarResultado(st.fines);
       $('f-reporte').hidden = true; $('resultado').hidden = false;
       window.scrollTo(0, 0);
     } catch (e) {
@@ -1349,9 +1351,21 @@
     pintarEnvio();
   }
 
+  function mostrarResultado(fines) {
+    const varios = fines.length > 1;
+    $('res-titulo').textContent = varios ? fines.length + ' hallazgos registrados' : 'Hallazgo registrado';
+    $('res-id').replaceChildren(...fines.map(f => el('div', {}, [f.id,
+      varios ? el('span', { class: 'ayuda', text: ' · ' + f.evidencias + ' evid.' }) : ''])));
+    $('res-detalle').textContent = varios
+      ? fines.reduce((s, f) => s + f.evidencias, 0) + ' evidencia(s) guardada(s) en total.'
+      : fines[0].evidencias + ' evidencia(s) guardada(s).';
+    $('res-manual').innerHTML = '';
+    $('res-manual').hidden = !fines.some(f => f.pendientes.length);
+    fines.forEach(mostrarManual);
+  }
+
   function mostrarManual(fin) {
     const caja = $('res-manual');
-    caja.innerHTML = ''; caja.hidden = !fin.pendientes.length;
     if (!fin.pendientes.length) return;
     const texto = 'Hallazgo ' + fin.id + ' – archivos para cargar manualmente\nCarpeta: ' + fin.ruta + '\n' +
       fin.pendientes.map(p => '• ' + p.original + '  →  guardar como: ' + p.nombre).join('\n');
