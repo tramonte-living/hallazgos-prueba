@@ -91,8 +91,13 @@
   
     .exito { text-align: center; }
     .check { font-size: 2.5rem; }
-    .tabla-est { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: .95rem; }
-    .tabla-est th, .tabla-est td { padding: 7px 6px; border-bottom: 1px solid var(--borde); text-align: left; }
+    .e-cab { display: flex; gap: 6px; align-items: center; }
+    .e-cab select { flex: 1; min-width: 0; margin: 0; }
+    .e-cab .btn { width: auto; flex: none; margin: 0; }
+    #e-resumen { font-size: .8rem; margin: 6px 0 4px; }
+    #e-info { font-size: .7rem; margin: 2px 0 0; }
+    .tabla-est { width: 100%; border-collapse: collapse; font-size: .8rem; line-height: 1.2; }
+    .tabla-est th, .tabla-est td { padding: 2px 4px; border-bottom: 1px solid var(--borde); text-align: left; }
     .tabla-est th:last-child, .tabla-est td:last-child { text-align: right; }
     .tabla-est .sin { color: #667085; }
     .id-grande { font-size: 1.6rem; font-weight: 700; color: var(--azul); letter-spacing: 1px; margin: 6px 0; }
@@ -338,9 +343,9 @@
       <div id="t-admin" class="panel" hidden>
         <div class="tarjeta">
           <h2>📊 Estadísticas</h2>
-          <div class="campo">
-            <label for="e-libro">Libro</label>
-            <select id="e-libro"></select>
+          <div class="e-cab">
+            <select id="e-libro" aria-label="Libro"></select>
+            <button id="e-actualizar" class="btn btn-sec mini" type="button">🔄 Actualizar</button>
           </div>
           <p id="e-resumen"></p>
           <table class="tabla-est">
@@ -348,7 +353,6 @@
             <tbody id="e-filas"></tbody>
           </table>
           <p id="e-info" class="ayuda"></p>
-          <button id="e-actualizar" class="btn btn-sec" type="button">🔄 Actualizar</button>
         </div>
         <div class="tarjeta">
           <h2>Usuarios</h2>
@@ -1696,7 +1700,7 @@
       libro.zonas.length + ' zonas con reportes · ' + (libro.zonas.length - con) + ' sin reportes' }));
     $('e-filas').replaceChildren(...libro.zonas.map(z => el('tr', z.n ? {} : { class: 'sin' }, [
       el('td', { text: z.nombre }), el('td', { text: z.n ? String(z.n) : '⚪ Sin reportes' })])));
-    $('e-info').textContent = 'Actualizado: ' + st.estad.actualizado + '. No cuenta Duplicado ni Anulado.';
+    $('e-info').textContent = 'Actualizado: ' + st.estad.actualizado + ' · No cuenta Duplicado ni Anulado';
   }
   $('e-libro').addEventListener('change', pintarEstadisticas);
   $('e-actualizar').addEventListener('click', ev => conEspera(ev.currentTarget, 'Actualizando…', () => cargarEstadisticas(true)));
