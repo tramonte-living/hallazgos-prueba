@@ -30,6 +30,11 @@
     .error { color: var(--error); font-size: .9rem; }
   
     .tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+    .subtabs { display: flex; gap: 4px; margin-bottom: 10px; }
+    .subtab { flex: 1 1 auto; min-width: 0; padding: 7px 2px; border: 0; border-bottom: 3px solid var(--borde); background: none;
+              font-size: .78rem; cursor: pointer; color: var(--texto); white-space: nowrap; }
+    @media (max-width: 340px) { .subtabs { gap: 2px; } .subtab { font-size: .7rem; padding: 7px 0; } }
+    .subtab.activa { border-bottom-color: var(--azul); color: var(--azul); font-weight: 700; }
     .tab { flex: 1; padding: 10px 6px; border: 1px solid var(--borde); background: #fff; border-radius: 10px;
            font-size: .95rem; cursor: pointer; color: var(--texto); }
     .tab.activa { background: var(--azul); color: #fff; border-color: var(--azul); }
@@ -341,6 +346,13 @@
 
       <!-- Admin -->
       <div id="t-admin" class="panel" hidden>
+        <nav class="subtabs">
+          <button class="subtab activa" data-sub="estadisticas" type="button">📊 Estadísticas</button>
+          <button class="subtab" data-sub="usuarios" type="button">👥 Usuarios</button>
+          <button class="subtab" data-sub="ajustes" type="button">⚙️ Ajustes</button>
+          <button class="subtab" data-sub="herramientas" type="button">🔧 Herramientas</button>
+        </nav>
+        <div id="s-estadisticas" class="subpanel">
         <div class="tarjeta">
           <h2>📊 Estadísticas</h2>
           <div class="e-cab">
@@ -354,6 +366,15 @@
           </table>
           <p id="e-info" class="ayuda"></p>
         </div>
+        <div class="tarjeta">
+          <h2>Control general</h2>
+          <p class="ayuda">Excel <b>Control_Evidencias_TramonteLiving</b>: resumen de las 5 torres y Zonas Comunes por estado y
+            por categoría. Se actualiza solo cada hora; use el botón para tenerlo al día ahora.</p>
+          <p id="ctl-info" class="ayuda"></p>
+          <button id="ctl-actualizar" class="btn" type="button">🔄 Actualizar control general</button>
+        </div>
+        </div>
+        <div id="s-usuarios" class="subpanel" hidden>
         <div class="tarjeta">
           <h2>Usuarios</h2>
           <div class="u-filtros">
@@ -384,6 +405,8 @@
             <button id="u-cancelar" class="btn btn-sec" type="button" style="margin-top:8px" hidden>Cancelar edición</button>
           </form>
         </div>
+        </div>
+        <div id="s-ajustes" class="subpanel" hidden>
         <div class="tarjeta">
           <h2>Ajustes de acceso</h2>
           <label class="switch">
@@ -408,13 +431,8 @@
           </label>
           <button id="a-guardar" class="btn" type="button">Guardar ajustes</button>
         </div>
-        <div class="tarjeta">
-          <h2>Control general</h2>
-          <p class="ayuda">Excel <b>Control_Evidencias_TramonteLiving</b>: resumen de las 5 torres y Zonas Comunes por estado y
-            por categoría. Se actualiza solo cada hora; use el botón para tenerlo al día ahora.</p>
-          <p id="ctl-info" class="ayuda"></p>
-          <button id="ctl-actualizar" class="btn" type="button">🔄 Actualizar control general</button>
         </div>
+        <div id="s-herramientas" class="subpanel" hidden>
         <div class="tarjeta">
           <h2>Enlaces</h2>
           <ul id="a-enlaces" class="enlaces"></ul>
@@ -444,6 +462,7 @@
             (se pueden recuperar durante 30 días). Los consecutivos vuelven a empezar en 001.
             Los códigos, categorías y ajustes no se tocan.</p>
           <button id="a-reset" class="btn btn-peligro" type="button">🗑 Borrar todo y empezar de nuevo</button>
+        </div>
         </div>
       </div>
     </section>
@@ -658,7 +677,7 @@
     document.querySelectorAll('.tab').forEach(x => x.classList.toggle('activa', x.dataset.tab === 'reportar'));
     ['reportar', 'consultar', 'admin'].forEach(t => { $('t-' + t).hidden = t !== 'reportar'; });
     ['c-lista', 'c-enlaces', 'ctl-info', 'u-lista', 'a-enlaces', 'u-temporal', 'lista-archivos', 'e-libro', 'e-filas', 'e-resumen', 'e-info'].forEach(id => { $(id).innerHTML = ''; });
-    $('u-temporal').hidden = true; $('a-reset-tarjeta').hidden = true; st.estad = null;
+    $('u-temporal').hidden = true; $('a-reset-tarjeta').hidden = true; st.estad = null; verSubpanel('estadisticas');
     $('c-total').textContent = ''; $('c-buscar').value = '';
     $('u-buscar').value = ''; $('u-filtro').innerHTML = ''; $('u-total').textContent = ''; st.usuarios = null; st.uAbierto = null;
     st.lista = []; st.archivos = []; st.envio = null; st.actual = null; st.actualEnCola = false; st.actualCreado = null; st.sinBorrador = false;
@@ -728,6 +747,12 @@
     if (b.dataset.tab === 'consultar') cargarLista();
     if (b.dataset.tab === 'admin' && !st.estad) cargarEstadisticas();
   }));
+
+  function verSubpanel(nombre) {
+    document.querySelectorAll('.subtab').forEach(x => x.classList.toggle('activa', x.dataset.sub === nombre));
+    document.querySelectorAll('.subpanel').forEach(x => { x.hidden = x.id !== 's-' + nombre; });
+  }
+  document.querySelectorAll('.subtab').forEach(b => b.addEventListener('click', () => verSubpanel(b.dataset.sub)));
 
   // ---------- reportar ----------
   function zonasDeLibro(id) { const l = st.datos.libros.find(x => x.id === id); return l ? l.zonas : []; }
