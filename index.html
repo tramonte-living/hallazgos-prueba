@@ -42,6 +42,9 @@
     .campo { margin-bottom: 12px; }
     .campo.corto { max-width: 200px; }
     .campo label { display: block; font-weight: 600; font-size: .9rem; margin-bottom: 4px; }
+    .c-fila { display: flex; gap: 8px; }
+    .c-fila input { flex: 1; min-width: 0; }
+    .c-fila select { width: auto; flex: none; }
     .fila2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     @media (max-width: 480px) { .fila2 { grid-template-columns: 1fr; } }
     input[type=text], input[type=password], input[type=search], input[type=number], input[type=date], select, textarea {
@@ -335,8 +338,12 @@
               <select id="c-zona"></select>
             </div>
           </div>
-          <div class="campo">
+          <div class="campo c-fila">
             <input id="c-buscar" type="search" placeholder="Buscar en ID, ubicación o descripción…">
+            <select id="c-mostrar" aria-label="Cuántos mostrar">
+              <option value="5">Últimos 5</option><option value="10">Últimos 10</option><option value="15">Últimos 15</option>
+              <option value="20">Últimos 20</option><option value="30">Últimos 30</option><option value="5000">Todos</option>
+            </select>
           </div>
           <p id="c-total" class="ayuda"></p>
           <div id="c-ver-todo" hidden>
@@ -1457,16 +1464,21 @@
     $('c-ver-todo').hidden = !conEnlace.length;
   }
   // Se cargan solo los más recientes; piso y búsqueda se filtran en el servidor sobre todo el libro.
-  const LISTA_INICIAL = 5, LISTA_MAS = 10;
+  // Cuántos mostrar: lo elige el usuario (5 a 30 o Todos) y el celular lo recuerda.
+  const LS_MOSTRAR = 'hz_mostrar_prueba';
+  const mostrar = () => Number($('c-mostrar').value) || 5;
+  $('c-mostrar').value = localStorage.getItem(LS_MOSTRAR) || '5';
+  if (!$('c-mostrar').value) $('c-mostrar').value = '5';
+  $('c-mostrar').addEventListener('change', () => { localStorage.setItem(LS_MOSTRAR, $('c-mostrar').value); cargarLista(); });
   $('c-libro').addEventListener('change', () => { actualizarZonasConsulta(); cargarLista(); });
   $('c-zona').addEventListener('change', () => cargarLista());
   $('c-buscar').addEventListener('input', () => {
     clearTimeout(cargarLista._t); cargarLista._t = setTimeout(() => cargarLista(), 600);
   });
 
-  /** mas = true: amplía la lista actual ("Ver más"); si no, vuelve a los últimos LISTA_INICIAL. */
+  /** mas = true: amplía la lista actual ("Ver más"); si no, vuelve a la cantidad elegida en "Mostrar". */
   async function cargarLista(mas) {
-    st.limite = mas ? (st.limite || LISTA_INICIAL) + LISTA_MAS : LISTA_INICIAL;
+    st.limite = mas ? (st.limite || mostrar()) + mostrar() : mostrar();
     const pedido = cargarLista._n = (cargarLista._n || 0) + 1; // descarta respuestas viejas
     if (!mas) $('c-lista').innerHTML = '';
     $('c-total').textContent = 'Cargando…';
@@ -1490,7 +1502,7 @@
     const libro = $('c-libro').value, items = st.lista, total = st.totalLista || 0;
     const filtro = $('c-zona').value || $('c-buscar').value.trim();
     $('c-total').textContent = !total ? (filtro ? 'Ningún hallazgo coincide.' : 'Aún no hay hallazgos en este libro.')
-      : (items.length < total ? 'Mostrando los ' + items.length + ' más recientes de ' : 'Mostrando ') +
+      : (items.length < total ? 'Mostrando los ' + items.length + ' más recientes de ' : 'Mostrando todos: ') +
         total + (filtro ? ' coincidencia(s).' : ' hallazgo(s).');
     const cont = $('c-lista'); cont.innerHTML = '';
     const admin = st.datos.sesion.rol === 'ADMIN';
@@ -1516,7 +1528,7 @@
       cont.appendChild(tarjeta);
     });
     if (items.length < total) {
-      const mas = el('button', { class: 'btn btn-sec', type: 'button', text: 'Ver ' + Math.min(LISTA_MAS, total - items.length) + ' más',
+      const mas = el('button', { class: 'btn btn-sec', type: 'button', text: 'Ver ' + Math.min(mostrar(), total - items.length) + ' más',
         onclick: () => conEspera(mas, 'Cargando…', () => cargarLista(true)) });
       cont.appendChild(mas);
     }
