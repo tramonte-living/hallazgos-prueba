@@ -118,6 +118,8 @@
     .hallazgo .editar { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--borde); }
     .hallazgo .editar textarea { min-height: 90px; }
     .hallazgo .editar .botones { display: flex; gap: 6px; }
+    .hallazgo .marcar { margin-top: 10px; }
+    .hallazgo .marcar summary { cursor: pointer; color: var(--gris); font-size: .85rem; padding: 4px 0; }
     .badge { font-size: .75rem; padding: 3px 8px; border-radius: 20px; background: #eef2f6; color: var(--gris); white-space: nowrap; }
     .badge.pend { background: #fff4e5; color: var(--aviso); }
     .badge.ok { background: #e7f6ec; color: var(--ok); }
@@ -1575,7 +1577,26 @@
       el('div', { class: 'campo' }, [el('label', { text: 'Descripción' }), desc]),
       el('p', { class: 'ayuda', text: 'El cambio queda registrado (quién, cuándo y qué decía antes).' }),
       el('div', { class: 'botones' }, [guardar, el('button', { class: 'btn btn-sec mini', type: 'button', text: 'Cancelar', onclick: () => pintarLista() })]),
+      formMarcar(h),
     ]);
+  }
+
+  /** Repetido o error: Duplicado (con el ID original) o Anulado (con motivo). Solo el admin puede devolverlo a Pendiente. */
+  function formMarcar(h) {
+    const tipo = el('select', {}, [el('option', { value: 'Duplicado', text: 'Duplicado' }), el('option', { value: 'Anulado', text: 'Anulado (error)' })]);
+    const det = el('input', { type: 'text', maxlength: '300', placeholder: 'ID original (ej. T4-P01-001)' });
+    tipo.addEventListener('change', () => { det.value = ''; det.placeholder = tipo.value === 'Duplicado' ? 'ID original (ej. T4-P01-001)' : 'Motivo'; });
+    const marcar = el('button', { class: 'btn btn-sec mini', type: 'button', text: 'Marcar', onclick: () => {
+      if (!det.value.trim()) return toast(tipo.value === 'Duplicado' ? 'Escriba el ID del hallazgo original.' : 'Escriba el motivo.', true);
+      if (!confirm('¿Marcar ' + h.id + ' como ' + tipo.value + '? Dejará de contarse en el Resumen y solo el administrador podrá revertirlo.')) return;
+      conEspera(marcar, 'Marcando…', async () => {
+        try { const r = await api('api_marcarHallazgo', st.codigo, h.id, tipo.value, det.value.trim());
+          h.estado = r.estado; h.obs = r.obs; h.editable = st.datos.sesion.rol === 'ADMIN'; toast(h.id + ' marcado como ' + r.estado); pintarLista(); }
+        catch (e) { toast(msgError(e), true); }
+      });
+    } });
+    return el('details', { class: 'marcar' }, [el('summary', { text: '🚫 ¿Repetido o error? Marcar como duplicado o anular' }),
+      el('div', { class: 'campo' }, [tipo]), el('div', { class: 'campo' }, [det]), marcar]);
   }
 
   function controlRevision(h) {
