@@ -152,8 +152,14 @@
   .usuarios-lista summary { display: flex; align-items: center; gap: 8px; padding: 9px 10px; cursor: pointer; list-style: none; }
   .usuarios-lista summary::-webkit-details-marker { display: none; }
   .usuarios-lista summary::before { content: '▸'; color: var(--gris); }
-  .usuarios-lista details[open] summary::before { content: '▾'; }
-  .usuarios-lista details[open] summary { background: #f3f6f9; }
+  .usuarios-lista details[open] > summary::before { content: '▾'; }
+  .usuarios-lista details[open] > summary { background: #f3f6f9; }
+  .usuarios-lista .u-grupo > summary, .usuarios-lista .u-grupo[open] > summary { background: #eef2f6; }
+  .usuarios-lista .u-grupo > summary .u-id { flex: none; }
+  .usuarios-lista .u-grupo > summary .u-marcas { min-width: 0; }
+  .usuarios-lista .u-grupo > summary .badge { white-space: normal; text-align: right; }
+  .usuarios-lista .u-sub { list-style: none; padding: 0 0 0 12px; margin: 0; }
+  .usuarios-lista .u-sub > li { border-top: 1px solid var(--borde); }
   .usuarios-lista .u-id { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .usuarios-lista .u-rol { color: var(--gris); font-size: .85rem; white-space: nowrap; }
   .usuarios-lista .u-marcas { margin-left: auto; display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
@@ -679,7 +685,7 @@
     ['c-lista', 'c-enlaces', 'ctl-info', 'u-lista', 'a-enlaces', 'u-temporal', 'lista-archivos', 'e-libro', 'e-filas', 'e-resumen', 'e-info'].forEach(id => { $(id).innerHTML = ''; });
     $('u-temporal').hidden = true; $('a-reset-tarjeta').hidden = true; st.estad = null; verSubpanel('estadisticas');
     $('c-total').textContent = ''; $('c-buscar').value = '';
-    $('u-buscar').value = ''; $('u-filtro').innerHTML = ''; $('u-total').textContent = ''; st.usuarios = null; st.uAbierto = null;
+    $('u-buscar').value = ''; $('u-filtro').innerHTML = ''; $('u-total').textContent = ''; st.usuarios = null; st.uAbierto = null; st.uGrupos = {};
     st.lista = []; st.archivos = []; st.envio = null; st.actual = null; st.actualEnCola = false; st.actualCreado = null; st.sinBorrador = false;
     $('bandeja').hidden = true; $('bandeja-lista').innerHTML = '';
     $('resultado').hidden = true; $('res-manual').hidden = true; $('f-reporte').hidden = false;
@@ -1598,7 +1604,7 @@
     $('u-total').textContent = lista.length === todos.length ? todos.length + ' usuarios. Toque uno para ver sus opciones.'
       : 'Mostrando ' + lista.length + ' de ' + todos.length + ' usuarios.';
     if (!lista.length) ul.appendChild(el('li', { class: 'ayuda', text: 'Ningún usuario coincide.' }));
-    lista.forEach(u => {
+    const filaUsuario = u => {
       const accion = (txt, fn, sec) => el('button', { class: 'btn mini' + (sec ? ' btn-sec' : ''), type: 'button', text: txt, onclick: fn });
       // Acciones que llaman al servidor: indicador en el propio botón mientras responde.
       const accionEspera = (txt, espera, fn, sec) => { const b = accion(txt, () => conEspera(b, espera, fn), sec); return b; };
@@ -1614,9 +1620,9 @@
       }));
       const marcas = [!u.activo ? ['Inactivo', 'mal'] : null, u.bloqueado ? ['Bloqueado', 'mal'] : null,
         !u.tieneClave ? ['Sin contraseña', 'pend'] : u.debeCambiar ? ['Contraseña temporal', 'pend'] : null].filter(Boolean);
-      const det = el('details', {}, [
+      const det = el('details', { class: 'u-det' }, [
         el('summary', {}, [el('span', { class: 'u-id', text: u.usuario + (u.usuario === yo ? ' (usted)' : '') }),
-          el('span', { class: 'u-rol', text: nombreRol(u.libro) }),
+          el('span', { class: 'u-rol', text: u.nombre || '' }),
           el('span', { class: 'u-marcas' }, marcas.map(m => el('span', { class: 'badge ' + m[1], text: m[0] })))]),
         el('div', { class: 'u-cuerpo' }, [
           el('div', { class: 'ayuda', text: (u.nombre || '—') + (u.ultimo ? ' · último ingreso ' + u.ultimo : ' · nunca ha ingresado') }),
@@ -1627,9 +1633,26 @@
       det.addEventListener('toggle', () => {
         if (!det.open) { if (st.uAbierto === u.usuario) st.uAbierto = null; return; }
         st.uAbierto = u.usuario;
-        ul.querySelectorAll('details[open]').forEach(d => { if (d !== det) d.open = false; });
+        ul.querySelectorAll('details.u-det[open]').forEach(d => { if (d !== det) d.open = false; });
       });
-      ul.appendChild(el('li', {}, [det]));
+      return el('li', {}, [det]);
+    };
+    // Un grupo plegable por rol/torre (administradores primero, luego el orden de la configuración). Se abre si el admin lo abrió, al buscar o filtrar,
+    // o si contiene al usuario abierto. Los avisos del grupo se ven aunque esté cerrado.
+    const grupos = ['ADMIN'].concat(orden, lista.map(u => u.libro)).filter((l, i, a) => a.indexOf(l) === i && lista.some(u => u.libro === l));
+    grupos.forEach(libro => {
+      const miembros = lista.filter(u => u.libro === libro);
+      const avisos = [['bloqueado', 'bloqueados', u => u.bloqueado, 'mal'], ['inactivo', 'inactivos', u => !u.activo, 'mal'],
+        ['sin contraseña', 'sin contraseña', u => !u.tieneClave, 'pend'], ['clave temporal', 'con clave temporal', u => u.tieneClave && u.debeCambiar, 'pend']]
+        .map(([uno, varios, fn, clase]) => { const n = miembros.filter(fn).length; return n && el('span', { class: 'badge ' + clase, text: '⚠️ ' + n + ' ' + (n > 1 ? varios : uno) }); })
+        .filter(Boolean);
+      const nombre = libro === 'ADMIN' ? '👑 Administradores' : (libro === 'ZC' ? '🌳 ' : '🏢 ') + nombreLibro(libro);
+      const g = el('details', { class: 'u-grupo' }, [
+        el('summary', {}, [el('span', { class: 'u-id', text: nombre + ' (' + miembros.length + ')' }), el('span', { class: 'u-marcas' }, avisos)]),
+        el('ul', { class: 'u-sub' }, miembros.map(filaUsuario))]);
+      g.open = !!(q || f !== 'TODOS' || (st.uGrupos || {})[libro] || miembros.some(u => u.usuario === st.uAbierto));
+      g.addEventListener('toggle', () => { if (!q && f === 'TODOS') (st.uGrupos = st.uGrupos || {})[libro] = g.open; });
+      ul.appendChild(el('li', {}, [g]));
     });
   }
   function formUsuario(u) {
