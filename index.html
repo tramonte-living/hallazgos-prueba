@@ -1646,7 +1646,7 @@
         ['sin contraseña', 'sin contraseña', u => !u.tieneClave, 'pend'], ['clave temporal', 'con clave temporal', u => u.tieneClave && u.debeCambiar, 'pend']]
         .map(([uno, varios, fn, clase]) => { const n = miembros.filter(fn).length; return n && el('span', { class: 'badge ' + clase, text: '⚠️ ' + n + ' ' + (n > 1 ? varios : uno) }); })
         .filter(Boolean);
-      const nombre = libro === 'ADMIN' ? '👑 Administradores' : (libro === 'ZC' ? '🌳 ' : '🏢 ') + nombreLibro(libro);
+      const nombre = libro === 'ADMIN' ? '👤 Administradores' : (libro === 'ZC' ? '🌳 ' : '🏢 ') + nombreLibro(libro);
       const g = el('details', { class: 'u-grupo' }, [
         el('summary', {}, [el('span', { class: 'u-id', text: nombre + ' (' + miembros.length + ')' }), el('span', { class: 'u-marcas' }, avisos)]),
         el('ul', { class: 'u-sub' }, miembros.map(filaUsuario))]);
