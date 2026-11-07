@@ -115,6 +115,9 @@
     .hallazgo .hid { font-weight: 700; color: var(--azul); }
     .hallazgo .meta { color: var(--gris); font-size: .85rem; margin: 2px 0 6px; }
     .hallazgo .desc { margin: 4px 0; white-space: pre-wrap; }
+    .hallazgo .editar { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--borde); }
+    .hallazgo .editar textarea { min-height: 90px; }
+    .hallazgo .editar .botones { display: flex; gap: 6px; }
     .badge { font-size: .75rem; padding: 3px 8px; border-radius: 20px; background: #eef2f6; color: var(--gris); white-space: nowrap; }
     .badge.pend { background: #fff4e5; color: var(--aviso); }
     .badge.ok { background: #e7f6ec; color: var(--ok); }
@@ -414,6 +417,10 @@
               <label for="u-nombre">Nombre (aparece en "Cargado por")</label>
               <input id="u-nombre" type="text" maxlength="80" placeholder="ej: Juan Pérez" required>
             </div>
+            <label class="switch" id="u-editor-caja">
+              <input type="checkbox" id="u-editor">
+              <span>✏️ Editor: puede corregir cualquier hallazgo de su torre (solo en "Pendiente de revisión")</span>
+            </label>
             <button id="u-guardar" class="btn" type="submit">Crear usuario</button>
             <button id="u-cancelar" class="btn btn-sec" type="button" style="margin-top:8px" hidden>Cancelar edición</button>
           </form>
@@ -1524,6 +1531,8 @@
         galeria,
         (h.pendientes || []).length ? el('div', { class: 'pend', text: '⏳ Pendiente carga manual: ' + h.pendientes.join(', ') }) : null,
       ]);
+      if (h.editable) tarjeta.appendChild(el('button', { class: 'btn btn-sec mini', type: 'button', text: '✏️ Editar',
+        onclick: ev => { ev.currentTarget.replaceWith(formEdicion(h)); } }));
       if (admin) tarjeta.appendChild(controlRevision(h));
       cont.appendChild(tarjeta);
     });
@@ -1546,6 +1555,27 @@
         galeria.replaceChild(a, ph);
       } catch (e) { ph.textContent = '⚠️'; ph.title = msgError(e); }
     }
+  }
+
+  /** Corrige ubicación y descripción de un hallazgo (el motor valida el permiso y guarda el historial). */
+  function formEdicion(h) {
+    const ubic = el('input', { type: 'text', maxlength: '200', placeholder: 'Ubicación exacta / referencia' });
+    const desc = el('textarea', { maxlength: '2000', placeholder: 'Descripción del hallazgo' });
+    ubic.value = h.ubicacion || ''; desc.value = h.descripcion || '';
+    const guardar = el('button', { class: 'btn mini', type: 'button', text: '💾 Guardar', onclick: () => conEspera(guardar, 'Guardando…', async () => {
+      if (!desc.value.trim()) return toast('Escriba la descripción.', true);
+      try {
+        const r = await api('api_editarHallazgo', st.codigo, h.id, { ubicacion: ubic.value.trim(), descripcion: desc.value.trim() });
+        h.ubicacion = r.ubicacion; h.descripcion = r.descripcion;
+        toast(r.cambios ? h.id + ' actualizado' : 'Sin cambios'); pintarLista();
+      } catch (e) { toast(msgError(e), true); }
+    }) });
+    return el('div', { class: 'editar' }, [
+      el('div', { class: 'campo' }, [el('label', { text: '📍 Ubicación exacta' }), ubic]),
+      el('div', { class: 'campo' }, [el('label', { text: 'Descripción' }), desc]),
+      el('p', { class: 'ayuda', text: 'El cambio queda registrado (quién, cuándo y qué decía antes).' }),
+      el('div', { class: 'botones' }, [guardar, el('button', { class: 'btn btn-sec mini', type: 'button', text: 'Cancelar', onclick: () => pintarLista() })]),
+    ]);
   }
 
   function controlRevision(h) {
@@ -1630,7 +1660,7 @@
         try { await api('api_desbloquear', st.codigo, u.usuario); toast(u.usuario + ' desbloqueado'); cargarUsuarios(); }
         catch (e) { toast(msgError(e), true); }
       }));
-      const marcas = [!u.activo ? ['Inactivo', 'mal'] : null, u.bloqueado ? ['Bloqueado', 'mal'] : null,
+      const marcas = [u.editor ? ['✏️ Editor', 'ok'] : null, !u.activo ? ['Inactivo', 'mal'] : null, u.bloqueado ? ['Bloqueado', 'mal'] : null,
         !u.tieneClave ? ['Sin contraseña', 'pend'] : u.debeCambiar ? ['Contraseña temporal', 'pend'] : null].filter(Boolean);
       const det = el('details', { class: 'u-det' }, [
         el('summary', {}, [el('span', { class: 'u-id', text: u.usuario + (u.usuario === yo ? ' (usted)' : '') }),
@@ -1673,10 +1703,14 @@
     $('u-usuario').value = u ? u.usuario : ''; $('u-usuario').disabled = !!u;
     $('u-nombre').value = u ? u.nombre : '';
     $('u-libro').value = u ? u.libro : $('u-libro').options[0].value;
+    $('u-editor').checked = !!(u && u.editor); cajaEditor();
     $('u-guardar').textContent = u ? 'Guardar cambios' : 'Crear usuario';
     $('u-cancelar').hidden = !u;
     if (u) $('f-usuario').scrollIntoView({ behavior: 'smooth' });
   }
+  // El rol Editor es para usuarios de torre (el administrador ya puede editar todo).
+  function cajaEditor() { $('u-editor-caja').hidden = $('u-libro').value === 'ADMIN'; }
+  $('u-libro').addEventListener('change', cajaEditor);
   $('u-cancelar').addEventListener('click', () => formUsuario(null));
   $('f-usuario').addEventListener('submit', ev => {
     ev.preventDefault();
@@ -1684,7 +1718,8 @@
     const actual = nuevo ? null : st.editando;
     conEspera($('u-guardar'), nuevo ? 'Creando usuario…' : 'Guardando…', () => guardarUsuario({
       usuario: nuevo ? $('u-usuario').value.trim().toLowerCase() : actual,
-      libro: $('u-libro').value, nombre: $('u-nombre').value.trim(), activo: true }, nuevo));
+      libro: $('u-libro').value, nombre: $('u-nombre').value.trim(), activo: true,
+      editor: $('u-libro').value !== 'ADMIN' && $('u-editor').checked }, nuevo));
   });
   async function guardarUsuario(d, nuevo) {
     d.nuevo = nuevo;
