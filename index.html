@@ -179,6 +179,8 @@
   .aviso-version { position: fixed; left: 10px; right: 10px; bottom: 10px; z-index: 60; display: flex; gap: 10px; align-items: center;
                      background: var(--azul); color: #fff; border-radius: 12px; padding: 10px 12px; box-shadow: 0 4px 16px rgba(0,0,0,.25); }
   .aviso-version[hidden] { display: none; }
+  .tiempos .tiempo { padding: 6px 0; border-bottom: 1px solid var(--borde); font-size: .85rem; }
+  .tiempos .tiempo .ayuda { white-space: pre-line; margin: 2px 0 0; }
   .aviso-version span { flex: 1; font-size: .9rem; }
   .aviso-version .btn { width: auto; margin: 0; background: #fff; color: var(--azul); }
   .banner-prueba { background: #b54708; color: #fff; text-align: center; font-size: .8rem; font-weight: 600; padding: 4px; }
@@ -479,6 +481,13 @@
           <p id="a-fallos" class="ayuda"></p>
         </div>
         <div class="tarjeta">
+          <h2>⏱️ Tiempos de los últimos envíos</h2>
+          <p class="ayuda">Cuánto tardó cada paso (en segundos) en los envíos de las últimas horas. Sirve para ver qué
+            hace lenta la carga.</p>
+          <div id="tm-lista" class="tiempos"></div>
+          <button id="tm-ver" class="btn btn-sec" type="button">Ver tiempos</button>
+        </div>
+        <div class="tarjeta">
           <h2>Renombrar categoría</h2>
           <p class="ayuda">Cambia el nombre en las listas, en los hallazgos ya registrados de todos los libros y en el Resumen.</p>
           <div class="fila2">
@@ -713,7 +722,7 @@
   function limpiarPantalla() {
     document.querySelectorAll('.tab').forEach(x => x.classList.toggle('activa', x.dataset.tab === 'reportar'));
     ['reportar', 'consultar', 'admin'].forEach(t => { $('t-' + t).hidden = t !== 'reportar'; });
-    ['c-lista', 'c-enlaces', 'ctl-info', 'u-lista', 'a-enlaces', 'u-temporal', 'lista-archivos', 'e-libro', 'e-filas', 'e-resumen', 'e-info'].forEach(id => { $(id).innerHTML = ''; });
+    ['c-lista', 'c-enlaces', 'ctl-info', 'u-lista', 'a-enlaces', 'u-temporal', 'lista-archivos', 'e-libro', 'e-filas', 'e-resumen', 'e-info', 'tm-lista'].forEach(id => { $(id).innerHTML = ''; });
     $('u-temporal').hidden = true; $('a-reset-tarjeta').hidden = true; st.estad = null; verSubpanel('estadisticas');
     $('c-total').textContent = ''; $('c-buscar').value = '';
     $('u-buscar').value = ''; $('u-filtro').innerHTML = ''; $('u-total').textContent = ''; st.usuarios = null; st.uAbierto = null; st.uGrupos = {};
@@ -938,11 +947,14 @@
     if (!a.captura || a.preparada) return Promise.resolve();
     return a.preparando || (a.preparando = prepararCaptura(a, id).finally(() => { a.preparando = null; }));
   }
+  /** Descripción del archivo en Drive para una foto de la cámara. */
+  const infoCaptura = a => 'Tomada con la app: ' + fechaHora(a.captura.fecha) + ' · ' + textoGps(a.captura.gps) + ' · ' + (st.datos.sesion.usuario || '');
+  const llevaMarca = a => !!(a.captura && !a.preparada && st.datos.marcaAgua && /^image\//.test(a.file.type));
   async function prepararCaptura(a, id) {
     if (!a.captura || a.preparada) return;
     const c = a.captura;
     c.fija = true; // al enviar se usa la mejor ubicación conseguida hasta ahora
-    a.info = 'Tomada con la app: ' + fechaHora(c.fecha) + ' · ' + textoGps(c.gps) + ' · ' + (st.datos.sesion.usuario || '');
+    a.info = infoCaptura(a);
     if (st.datos.marcaAgua && /^image\//.test(a.file.type)) {
       try {
         a.file = await marcaDe(a, lineasMarca(a, id));
@@ -1037,7 +1049,7 @@
   // Quien tiene la página abierta desde antes recibe la versión nueva: al volver a la pestaña, al volver la señal y
   // después de enviar, se compara la versión con la publicada (sw.js). Sin nada a medias se actualiza sola; si hay algo
   // a medias, solo avisa. La sesión no se pierde y lo que se está llenando queda guardado en el celular.
-  const VERSION = '80de98bbfe78';
+  const VERSION = '3685208bdf2b';
   let versionRevisada = 0;
   async function revisarVersion(ya) {
     if (VERSION.indexOf('__') === 0 || navigator.onLine === false || !st.datos) return; // sin publicar (pruebas) o sin señal
@@ -1082,7 +1094,10 @@
 
   /** Sube el archivo a[i] y devuelve el nombre con que quedó en Drive. */
   async function subirArchivo(a, id, ticket, i, total) {
-    if (a.captura && !a.preparada) { progreso(5 + 90 * i / total, 'Preparando foto ' + (i + 1) + ' de ' + total + '…'); await prepararUna(a, id); }
+    if (a.captura && !a.preparada) {
+      progreso(5 + 90 * i / total, 'Preparando foto ' + (i + 1) + ' de ' + total + '…');
+      const t0 = Date.now(); await prepararUna(a, id); if (st.medidas) st.medidas.preparar += Date.now() - t0;
+    }
     // Mientras esta se sube, la siguiente foto de la cámara se va preparando (marca de agua).
     const sig = st.archivos.slice(i + 1).find(x => x.captura && !x.preparada && !x.hecho && !x.pendiente && !x.manual);
     if (sig) prepararUna(sig, id).catch(() => {});
@@ -1112,7 +1127,8 @@
       x.setRequestHeader('Content-Range', rango);
       x.timeout = ms;
       if (alAvanzar && x.upload) x.upload.onprogress = ev => alAvanzar(ev.loaded);
-      x.onload = () => ok({ status: x.status, rango: x.getResponseHeader('Range'), texto: x.responseText });
+      const t0 = Date.now();
+      x.onload = () => { if (st.medidas) st.medidas.subir += Date.now() - t0; ok({ status: x.status, rango: x.getResponseHeader('Range'), texto: x.responseText }); };
       x.onerror = () => mal(errorRed('Sin conexión con Google Drive.'));
       x.ontimeout = () => mal(errorRed('Google Drive tardó demasiado en responder.'));
       x.send(cuerpo);
@@ -1127,10 +1143,15 @@
     const tam = a.file.size;
     const pct = b => 5 + 90 * (i + (tam ? b / tam : 1)) / total;
     const txt = b => 'Subiendo ' + (i + 1) + ' de ' + total + ': ' + mb(b) + ' de ' + mb(tam) + '…';
+    if (a.sesion && a.plan && (a.plan.mime !== a.file.type || (a.plan.info || '') !== (a.info || '')) && !a.enviado) {
+      a.sesion = null; a.plan = null; // se abrió para otro tipo de archivo o con otra descripción
+    }
     return conReintentos(async () => {
       if (!a.sesion) {
         try {
+          const t0 = Date.now();
           const r = await api('api_iniciarSubida', st.codigo, id, ticket, a.indice, a.file.name, a.file.type, tam, a.info || '');
+          if (st.medidas) st.medidas.permisos += Date.now() - t0;
           a.sesion = r.url; a.nombreFinal = r.nombre; a.enviado = 0; a.verificar = false;
         } catch (e) {
           if (/SUBIDA_NO_DISPONIBLE|^Acción no válida/.test(e.message)) e.noDisponible = true; // motor sin la función nueva
@@ -1247,7 +1268,7 @@
         captura: a.captura ? Object.assign({}, a.captura, { fecha: +a.captura.fecha }) : null,
         indice: a.indice, hecho: !!a.hecho, pendiente: !!a.pendiente, fallo: !!a.fallo, estado: a.estado || '',
         sesion: a.sesion || null, enviado: a.enviado || 0, nombreFinal: a.nombreFinal || '', info: a.info || '',
-        preparada: !!a.preparada, sinPartes: !!a.sinPartes, verificar: !!a.verificar, fileId: a.fileId || '',
+        preparada: !!a.preparada, sinPartes: !!a.sinPartes, verificar: !!a.verificar, fileId: a.fileId || '', plan: a.plan || null,
       })),
     };
     st.actualCreado = rec.creado;
@@ -1461,8 +1482,13 @@
         const datos = leerFormulario();
         datos.nArchivos = st.archivos.length; datos.claveEnvio = st.envio.clave;
         st.archivos.forEach((a, i) => { a.indice = i + 1; });
+        datos.subidas = planSubidas();
+        st.medidas = { registrar: 0, preparar: 0, permisos: 0, subir: 0 };
+        const t0 = Date.now();
         const r = await conReintentos(() => api('api_crearHallazgo', st.codigo, datos), 'Registrando hallazgo…', 3);
+        st.medidas.registrar = Date.now() - t0;
         st.envio.id = r.id; st.envio.ticket = r.ticket;
+        usarPermisos(r.subidas, datos.subidas);
         pintarEnvio(); guardarBorradorYa();
       }
       const id = st.envio.id, ticket = st.envio.ticket, lista = st.archivos;
@@ -1481,7 +1507,7 @@
       }
       const pendientes = lista.filter(a => a.pendiente).map(a => ({ indice: a.indice, original: a.file.name, mime: a.file.type }));
       const subidos = lista.filter(a => a.hecho && a.fileId).map(a => ({ indice: a.indice, fileId: a.fileId }));
-      const fin = await conReintentos(() => api('api_finalizarHallazgo', st.codigo, id, ticket, pendientes, subidos), 'Finalizando…', 97);
+      const fin = await conReintentos(() => api('api_finalizarHallazgo', st.codigo, id, ticket, pendientes, subidos, st.medidas || {}), 'Finalizando…', 97);
       progreso(100, 'Listo');
       st.envio = null; gpsApagar(); exito = true;
       borradorEnviado();
@@ -1504,6 +1530,29 @@
     }
     return exito;
   }
+  /**
+   * Lo que el motor necesita para abrir de una vez la sesión de carga de cada foto o video al registrar el hallazgo.
+   * Las fotos que llevarán marca de agua aún no tienen su tamaño final: van sin tamaño y como .jpg; su ubicación se fija ya.
+   */
+  function planSubidas() {
+    return st.archivos.filter(a => !a.manual && !a.malo && !a.sinPartes && !a.sesion && !a.hecho && !a.pendiente).map(a => {
+      const marca = llevaMarca(a);
+      if (a.captura) a.captura.fija = true;
+      return { indice: a.indice, nombre: marca ? a.file.name.replace(/\.[^.]*$/, '') + '.jpg' : a.file.name,
+        mime: marca ? 'image/jpeg' : a.file.type, tamano: marca ? null : a.file.size,
+        info: a.captura ? infoCaptura(a) + (marca ? ' · con marca de agua' : '') : '' };
+    });
+  }
+  /** Asigna a cada archivo la sesión abierta por el motor (si el motor es anterior o falló, se piden una por una). */
+  function usarPermisos(subidas, plan) {
+    (subidas || []).forEach(x => {
+      const a = st.archivos.find(y => y.indice === x.indice), p = (plan || []).find(y => y.indice === x.indice);
+      if (!a || !p || a.sesion) return;
+      a.sesion = x.url; a.nombreFinal = x.nombre; a.enviado = 0; a.verificar = false;
+      a.plan = { mime: p.mime, info: p.info };
+    });
+  }
+
   /** op.borrar: elimina también la copia guardada en el celular (si no, queda donde estaba: bandeja o nada). */
   function reiniciarFormulario(op) {
     if (op && op.borrar && st.actual) bdQuitarReporte(st.actual).then(pintarBandeja);
@@ -1919,6 +1968,28 @@
   $('ctl-actualizar').addEventListener('click', ev => conEspera(ev.currentTarget, 'Actualizando… (puede tardar)', async () => {
     try { const c = await api('api_actualizarControl', st.codigo); st.datos.control = c; pintarControl(c); toast('Control general actualizado'); }
     catch (e) { toast(msgError(e), true); }
+  }));
+  // ---------- admin: tiempos de envío ----------
+  const seg = ms => (Math.round((ms || 0) / 100) / 10).toLocaleString('es-CO') + ' s';
+  const PASOS = { inicio: 'arranque', abrir: 'abrir Excel', carpeta: 'carpeta', turno: 'esperar turno', numero: 'número',
+    escribir: 'escribir', autor: 'marca autor', recalculo: 'recálculo Excel', permisos: 'permisos fotos', fila: 'buscar fila',
+    fotos: 'buscar fotos', cerrar: 'cerrar', preparar: 'validar', drive: 'Drive' };
+  const detallePasos = p => Object.keys(p || {}).filter(k => p[k] >= 50).map(k => (PASOS[k] || k) + ' ' + seg(p[k])).join(' · ');
+  $('tm-ver').addEventListener('click', ev => conEspera(ev.currentTarget, 'Cargando…', async () => {
+    try {
+      const l = await api('api_tiempos', st.codigo);
+      const caja = $('tm-lista'); caja.innerHTML = '';
+      if (!l.length) { caja.appendChild(el('p', { class: 'ayuda', text: 'Aún no hay envíos registrados (se guardan unas 6 horas).' })); return; }
+      l.forEach(x => {
+        const tit = { registrar: '📝 Registrar', finalizar: '✅ Finalizar', permiso: '🔑 Permiso de foto ' + (x.indice || '') }[x.paso] || x.paso;
+        const pg = x.pagina, lineas = [detallePasos(x.pasos)];
+        if (pg) lineas.push('En el celular: registrar (ida y vuelta) ' + seg(pg.registrar) + ' · preparar fotos ' + seg(pg.preparar) +
+          ' · permisos sueltos ' + seg(pg.permisos) + ' · subir a Drive ' + seg(pg.subir));
+        caja.appendChild(el('div', { class: 'tiempo' }, [el('b', { text: tit + ' · ' + (x.id || '') + ' · motor ' + seg(x.ms) }),
+          el('span', { class: 'ayuda', text: ' ' + x.hora + (x.fotos != null ? ' · ' + x.fotos + ' foto(s)' : '') }),
+          el('div', { class: 'ayuda', text: lineas.filter(String).join('\n') })]));
+      });
+    } catch (e) { toast(msgError(e), true); }
   }));
   $('a-recargar').addEventListener('click', ev => conEspera(ev.currentTarget, 'Recargando…', async () => {
     try { await api('api_recargarConfig', st.codigo); toast('Configuración recargada'); iniciar(st.codigo); cargarEstadisticas(); }
