@@ -1049,7 +1049,7 @@
   // Quien tiene la página abierta desde antes recibe la versión nueva: al volver a la pestaña, al volver la señal y
   // después de enviar, se compara la versión con la publicada (sw.js). Sin nada a medias se actualiza sola; si hay algo
   // a medias, solo avisa. La sesión no se pierde y lo que se está llenando queda guardado en el celular.
-  const VERSION = '3685208bdf2b';
+  const VERSION = '2395ab396ab3';
   let versionRevisada = 0;
   async function revisarVersion(ya) {
     if (VERSION.indexOf('__') === 0 || navigator.onLine === false || !st.datos) return; // sin publicar (pruebas) o sin señal
