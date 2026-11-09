@@ -1185,8 +1185,11 @@
   }
   /** Pone en el formulario un reporte guardado. */
   async function cargarEnFormulario(rec) {
-    const blobs = await bdTx(['archivos'], 'readonly', a => a.getAll());
-    const porFid = {}; blobs.forEach(b => { porFid[b.fid] = b.blob; });
+    // Solo las fotos de este reporte (leerlas todas de la bandeja es lento y gasta memoria con varios pendientes).
+    const porFid = {};
+    await bdTx(['archivos'], 'readonly', a => {
+      (rec.archivos || []).forEach(x => { const q = a.get(x.fid); q.onsuccess = () => { if (q.result) porFid[x.fid] = q.result.blob; }; });
+    });
     st.archivos.forEach(a => a.url && URL.revokeObjectURL(a.url));
     const d = rec.datos || {};
     if (st.datos.libros.some(l => l.id === d.libro)) { $('sel-libro').value = d.libro; actualizarZonas(); }
