@@ -1014,6 +1014,7 @@
     const res = await conReintentos(() => llamar('api_subirEvidencia',
       [st.codigo, id, ticket, a.indice, a.file.name, a.file.type, b64, a.info || ''], ms),
       'Subiendo ' + (i + 1) + ' de ' + total + ' (' + mb(a.file.size) + ')…', 5 + 90 * i / total);
+    a.fileId = res.fileId || '';
     return res.nombre;
   }
 
@@ -1033,6 +1034,8 @@
   }
   /** Bytes que Drive ya tiene según el encabezado Range ("bytes=0-N"), o null si no lo informa. */
   const bytesRecibidos = r => { const m = /-(\d+)$/.exec(r.rango || ''); return m ? Number(m[1]) + 1 : null; };
+  /** Identificador del archivo que Drive devuelve al completar la subida (se le pasa al motor al finalizar). */
+  const idDeDrive = r => { try { return String(JSON.parse(r.texto).id || ''); } catch (e) { return ''; } };
 
   async function subirPorPartes(a, id, ticket, i, total) {
     const tam = a.file.size;
@@ -1051,7 +1054,7 @@
       if (a.verificar) {
         // Después de un corte: Drive dice cuántos bytes recibió (o que el archivo ya está completo).
         const r = await putDrive(a.sesion, null, 'bytes */' + tam, 30000);
-        if (r.status === 200 || r.status === 201) return a.nombreFinal;
+        if (r.status === 200 || r.status === 201) { a.fileId = idDeDrive(r); return a.nombreFinal; }
         if (r.status === 308) { const b = bytesRecibidos(r); a.enviado = b == null ? 0 : b; }
         else return errorDrive(a, r);
         a.verificar = false;
@@ -1072,7 +1075,7 @@
           }
           throw e;
         }
-        if (r.status === 200 || r.status === 201) { st.partesOk = true; return a.nombreFinal; }
+        if (r.status === 200 || r.status === 201) { st.partesOk = true; a.fileId = idDeDrive(r); return a.nombreFinal; }
         if (r.status !== 308) return errorDrive(a, r);
         st.partesOk = true;
         const b = bytesRecibidos(r);
@@ -1158,7 +1161,7 @@
         captura: a.captura ? Object.assign({}, a.captura, { fecha: +a.captura.fecha }) : null,
         indice: a.indice, hecho: !!a.hecho, pendiente: !!a.pendiente, fallo: !!a.fallo, estado: a.estado || '',
         sesion: a.sesion || null, enviado: a.enviado || 0, nombreFinal: a.nombreFinal || '', info: a.info || '',
-        preparada: !!a.preparada, sinPartes: !!a.sinPartes, verificar: !!a.verificar,
+        preparada: !!a.preparada, sinPartes: !!a.sinPartes, verificar: !!a.verificar, fileId: a.fileId || '',
       })),
     };
     st.actualCreado = rec.creado;
@@ -1391,7 +1394,8 @@
         pintarArchivos();
       }
       const pendientes = lista.filter(a => a.pendiente).map(a => ({ indice: a.indice, original: a.file.name, mime: a.file.type }));
-      const fin = await conReintentos(() => api('api_finalizarHallazgo', st.codigo, id, ticket, pendientes), 'Finalizando…', 97);
+      const subidos = lista.filter(a => a.hecho && a.fileId).map(a => ({ indice: a.indice, fileId: a.fileId }));
+      const fin = await conReintentos(() => api('api_finalizarHallazgo', st.codigo, id, ticket, pendientes, subidos), 'Finalizando…', 97);
       progreso(100, 'Listo');
       st.envio = null; gpsApagar(); exito = true;
       borradorEnviado();
