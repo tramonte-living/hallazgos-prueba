@@ -451,6 +451,11 @@
             <input type="checkbox" id="a-marca">
             <span>Marca de agua en las fotos tomadas con la app (ID, fecha, hora y GPS)</span>
           </label>
+          <label class="switch">
+            <input type="checkbox" id="a-marca-id">
+            <span>Incluir el ID del hallazgo en la marca de agua. Si se desactiva, la marca se pone apenas se toma la foto
+              (mientras se llena el formulario) y el envío es más rápido; el archivo igual se llama con el ID.</span>
+          </label>
           <button id="a-guardar" class="btn" type="button">Guardar ajustes</button>
         </div>
         </div>
@@ -603,7 +608,7 @@
   }
   // Datos para usar la página sin conexión: solo lo que necesita el formulario (nada de administración).
   const LS_DATOS = 'hz_datos_prueba';
-  const CAMPOS_SIN_CONEXION = ['sesion', 'libros', 'categorias', 'estados', 'limiteMB', 'maxEvidencias', 'camara', 'marcaAgua'];
+  const CAMPOS_SIN_CONEXION = ['sesion', 'libros', 'categorias', 'estados', 'limiteMB', 'maxEvidencias', 'camara', 'marcaAgua', 'marcaId'];
   function guardarDatos(d) {
     const o = {}; CAMPOS_SIN_CONEXION.forEach(k => { o[k] = d[k]; });
     try { localStorage.setItem(LS_DATOS, JSON.stringify(o)); } catch (e) { /* sin espacio: se sigue */ }
@@ -739,6 +744,7 @@
       $('a-maxev').value = d.ajustes.maxEvidencias;
       $('a-camara').checked = !!d.ajustes.camaraTorres;
       $('a-marca').checked = !!d.ajustes.marcaAgua;
+      $('a-marca-id').checked = d.ajustes.marcaId !== false;
       $('a-fallos').textContent = '🔒 Intentos de ingreso fallidos en la última hora: ' + (d.ajustes.fallosHora || 0) +
         (d.ajustes.fallosHora > 20 ? ' ⚠️ Muchos intentos: revise los usuarios bloqueados.' : '');
       opciones($('u-libro'), d.librosAdmin.map(l => ({ value: l.id, text: l.nombre })).concat([{ value: 'ADMIN', text: 'Administrador' }]));
@@ -781,7 +787,7 @@
   function actualizarZonas() { opciones($('sel-zona'), zonasDeLibro($('sel-libro').value), 'Seleccione…'); }
   $('sel-libro').addEventListener('change', actualizarZonas);
   $('f-reporte').addEventListener('input', () => guardarBorrador());
-  $('f-reporte').addEventListener('change', () => guardarBorrador());
+  $('f-reporte').addEventListener('change', () => { guardarBorrador(); premarcar(); });
 
   const maxEvidencias = () => st.datos.maxEvidencias || 5;
   function agregarArchivos(files, captura) {
@@ -806,7 +812,7 @@
     agregarArchivos(files, captura);
     if (captura.fija) return;
     gpsEncender(GPS_AFINAR);
-    setTimeout(() => { captura.fija = true; pintarArchivos(); gpsRevisarApagado(); }, GPS_AFINAR);
+    setTimeout(() => { captura.fija = true; pintarArchivos(); gpsRevisarApagado(); premarcar(); }, GPS_AFINAR);
   });
 
   // ---------- ubicación (GPS) ----------
@@ -884,21 +890,55 @@
     return new File([blob], file.name.replace(/\.[^.]*$/, '') + '.jpg', { type: 'image/jpeg', lastModified: Date.now() });
   }
   /** Antes de subir una foto de la cámara: marca de agua (si está activa) y texto para la descripción en Drive. */
+  /** Texto de la marca; el ID solo si el admin lo tiene activado (si no, la marca se puede poner antes de enviar). */
+  function lineasMarca(a, id) {
+    const c = a.captura, f = leerFormulario();
+    return [(st.datos.marcaId !== false && id ? id + ' · ' : '') + nombreLibro(f.libro) + ' · ' + f.zona + ' · ' + f.categoria,
+      fechaHora(c.fecha) + ' · ' + (st.datos.sesion.usuario || ''), textoGps(c.gps)];
+  }
+  /** Foto con marca para esas líneas; reutiliza la ya hecha (o en curso) si el texto no cambió. */
+  function marcaDe(a, lineas) {
+    const clave = lineas.join('|');
+    if (a.marcada && a.marcada.clave === clave) return Promise.resolve(a.marcada.file);
+    if (a.marcando && a.marcando.clave === clave) return a.marcando.p;
+    const p = marcarFoto(a.file, lineas).then(file => { a.marcada = { clave, file }; return file; });
+    a.marcando = { clave, p };
+    p.catch(() => {}).then(() => { if (a.marcando && a.marcando.p === p) a.marcando = null; });
+    return p;
+  }
+  /**
+   * Sin ID en la marca: en segundo plano, una foto a la vez, apenas la foto tiene su GPS definitivo (30 s) y el formulario
+   * tiene zona y categoría. Si después cambian, la marca se rehace. Al enviar se usa la ya preparada.
+   */
+  async function premarcar() {
+    if (st.premarcando || st.enviando || !st.datos || !st.datos.marcaAgua || st.datos.marcaId !== false || enCurso()) return;
+    const f = leerFormulario();
+    if (!f.zona || !f.categoria) return;
+    const a = st.archivos.find(x => x.captura && x.captura.fija && !x.preparada && /^image\//.test(x.file.type) &&
+      !(x.marcada && x.marcada.clave === lineasMarca(x).join('|')));
+    if (!a) return;
+    st.premarcando = true;
+    try { await marcaDe(a, lineasMarca(a)); } catch (e) { /* se reintenta al enviar */ }
+    st.premarcando = false;
+    premarcar(); // la siguiente
+  }
+  /** Prepara una foto una sola vez aunque se pida desde el envío y desde la preparación anticipada de la siguiente. */
+  function prepararUna(a, id) {
+    if (!a.captura || a.preparada) return Promise.resolve();
+    return a.preparando || (a.preparando = prepararCaptura(a, id).finally(() => { a.preparando = null; }));
+  }
   async function prepararCaptura(a, id) {
     if (!a.captura || a.preparada) return;
-    const c = a.captura, f = leerFormulario();
+    const c = a.captura;
     c.fija = true; // al enviar se usa la mejor ubicación conseguida hasta ahora
     a.info = 'Tomada con la app: ' + fechaHora(c.fecha) + ' · ' + textoGps(c.gps) + ' · ' + (st.datos.sesion.usuario || '');
     if (st.datos.marcaAgua && /^image\//.test(a.file.type)) {
       try {
-        a.file = await marcarFoto(a.file, [
-          id + ' · ' + nombreLibro(f.libro) + ' · ' + f.zona + ' · ' + f.categoria,
-          fechaHora(c.fecha) + ' · ' + (st.datos.sesion.usuario || ''),
-          textoGps(c.gps),
-        ]);
+        a.file = await marcaDe(a, lineasMarca(a, id));
         a.info += ' · con marca de agua';
       } catch (e) { a.info += ' · sin marca de agua (' + msgError(e) + ')'; }
     }
+    a.marcada = null;
     a.preparada = true;
   }
 
@@ -999,7 +1039,10 @@
 
   /** Sube el archivo a[i] y devuelve el nombre con que quedó en Drive. */
   async function subirArchivo(a, id, ticket, i, total) {
-    if (a.captura && !a.preparada) { progreso(5 + 90 * i / total, 'Preparando foto ' + (i + 1) + ' de ' + total + '…'); await prepararCaptura(a, id); }
+    if (a.captura && !a.preparada) { progreso(5 + 90 * i / total, 'Preparando foto ' + (i + 1) + ' de ' + total + '…'); await prepararUna(a, id); }
+    // Mientras esta se sube, la siguiente foto de la cámara se va preparando (marca de agua).
+    const sig = st.archivos.slice(i + 1).find(x => x.captura && !x.preparada && !x.hecho && !x.pendiente && !x.manual);
+    if (sig) prepararUna(sig, id).catch(() => {});
     if (!a.sinPartes) {
       try { return await subirPorPartes(a, id, ticket, i, total); }
       catch (e) {
@@ -1217,7 +1260,7 @@
     const lista = await misReportes();
     const borrador = lista.filter(r => !r.enCola).sort((a, b) => b.guardado - a.guardado)[0];
     if (borrador && !formularioConDatos()) {
-      try { await cargarEnFormulario(borrador); toast('💾 Se recuperó el reporte que estabas llenando.'); }
+      try { await cargarEnFormulario(borrador); premarcar(); toast('💾 Se recuperó el reporte que estabas llenando.'); }
       catch (e) { /* sin almacenamiento */ }
     }
     pintarBandeja();
@@ -1632,8 +1675,10 @@
       const aj = await api('api_guardarAjustes', st.codigo, {
         cualquierTorre: $('a-cualquier').checked, limiteMB: Number($('a-limite').value) || 50,
         maxEvidencias: Number($('a-maxev').value) || 5, camaraTorres: $('a-camara').checked, marcaAgua: $('a-marca').checked,
+        marcaId: $('a-marca-id').checked,
       });
-      Object.assign(st.datos, { ajustes: aj, limiteMB: aj.limiteMB, maxEvidencias: aj.maxEvidencias, marcaAgua: aj.marcaAgua });
+      Object.assign(st.datos, { ajustes: aj, limiteMB: aj.limiteMB, maxEvidencias: aj.maxEvidencias, marcaAgua: aj.marcaAgua, marcaId: aj.marcaId });
+      premarcar();
       $('limite-mb').textContent = aj.limiteMB; $('a-maxev').value = aj.maxEvidencias;
       pintarArchivos();
       toast('Ajustes guardados');
