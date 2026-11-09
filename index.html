@@ -176,11 +176,20 @@
   .usuarios-lista .ayuda { padding: 10px; }
   .clave-temporal { background: #eef6ff; border: 1px solid var(--azul2); border-radius: 10px; padding: 12px; margin: 10px 0; }
   .clave-temporal code { font-size: 1.2rem; letter-spacing: 2px; background: #fff; padding: 2px 8px; border-radius: 6px; }
+  .aviso-version { position: fixed; left: 10px; right: 10px; bottom: 10px; z-index: 60; display: flex; gap: 10px; align-items: center;
+                     background: var(--azul); color: #fff; border-radius: 12px; padding: 10px 12px; box-shadow: 0 4px 16px rgba(0,0,0,.25); }
+  .aviso-version[hidden] { display: none; }
+  .aviso-version span { flex: 1; font-size: .9rem; }
+  .aviso-version .btn { width: auto; margin: 0; background: #fff; color: var(--azul); }
   .banner-prueba { background: #b54708; color: #fff; text-align: center; font-size: .8rem; font-weight: 600; padding: 4px; }
   [hidden] { display: none !important; }
   </style>
 </head>
 <body>
+  <div id="aviso-version" class="aviso-version" hidden>
+    <span>🔄 Hay una versión nueva de la página.</span>
+    <button id="btn-actualizar" class="btn mini" type="button">Actualizar</button>
+  </div>
   <div id="banner-prueba" class="banner-prueba" hidden>🧪 AMBIENTE DE PRUEBA · lo que reportes aquí es solo de práctica y no se envía a la interventoría</div>
   <header class="barra">
     <div class="marca">🏢 <b>Tramonte</b> · Hallazgos</div>
@@ -721,6 +730,7 @@
     $('usuario-txt').textContent = (s.usuario ? s.usuario + ' · ' : '') + (s.rol === 'ADMIN' ? 'Administrador' : nombreLibro(s.libro));
     $('tab-admin').hidden = s.rol !== 'ADMIN';
     limpiarPantalla();
+    setTimeout(() => revisarVersion(true), 3000);
     $('limite-mb').textContent = d.limiteMB;
     $('subir-camara').hidden = !d.camara;
     $('txt-galeria').textContent = d.camara ? '🖼️ Galería' : '➕ Agregar fotos o videos';
@@ -956,8 +966,8 @@
       a.manual = tipoOk && a.file.size > limite;
       const mini = a.url ? el('img', { class: 'mini', src: a.url, alt: '' }) : el('div', { class: 'mini', text: /^video/.test(a.file.type) ? '🎬' : '📄' });
       const toma = a.captura ? ' · 📷 ' + a.captura.fecha.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' }) +
-        (st.datos.marcaAgua ? ' · 📍 ' + (a.captura.gps ? '±' + a.captura.gps.prec + ' m' + (a.captura.fija ? '' : ' (afinando…)')
-          : st.gpsError === 'bloqueada' ? 'ubicación bloqueada' : a.captura.fija ? 'sin ubicación' : 'buscando…') : '') : '';
+        (st.datos.marcaAgua ? ' · 📍 ' + (a.captura.gps ? '±' + a.captura.gps.prec + ' m' + (a.captura.fija ? '' : ' (mejorando ubicación…)')
+          : st.gpsError === 'bloqueada' ? 'ubicación bloqueada' : a.captura.fija ? 'sin ubicación' : 'buscando ubicación…') : '') : '';
       const nota = !tipoOk ? 'Tipo no permitido' : a.estado ||
         (a.manual ? mb(a.file.size) + ' · supera ' + st.datos.limiteMB + ' MB: se entregará manualmente' : mb(a.file.size) + toma);
       ul.appendChild(el('li', { class: 'archivo' + (a.malo ? ' malo' : a.manual || a.fallo ? ' manual' : '') }, [
@@ -1022,6 +1032,38 @@
     } catch (e) { /* no disponible: se sigue sin ella */ }
   }
   document.addEventListener('visibilitychange', () => { if (st.enviando && document.visibilityState === 'visible') pantallaEncendida(true); });
+
+  // ---------- versión nueva de la página ----------
+  // Quien tiene la página abierta desde antes recibe la versión nueva: al volver a la pestaña, al volver la señal y
+  // después de enviar, se compara la versión con la publicada (sw.js). Sin nada a medias se actualiza sola; si hay algo
+  // a medias, solo avisa. La sesión no se pierde y lo que se está llenando queda guardado en el celular.
+  const VERSION = '80de98bbfe78';
+  let versionRevisada = 0;
+  async function revisarVersion(ya) {
+    if (VERSION.indexOf('__') === 0 || navigator.onLine === false || !st.datos) return; // sin publicar (pruebas) o sin señal
+    if (!ya && Date.now() - versionRevisada < 10 * 60000) return;
+    versionRevisada = Date.now();
+    let nueva;
+    try { nueva = (/hallazgos-([0-9a-f]{6,})/.exec(await (await fetch('sw.js?v=' + Date.now(), { cache: 'no-store' })).text()) || [])[1]; }
+    catch (e) { return; }
+    if (!nueva || nueva === VERSION) return;
+    // Una sola actualización automática por versión: si la página recibida sigue siendo la anterior (caché), solo avisa.
+    const marca = 'hz_actualizada_' + nueva;
+    if (sinNadaAMedias() && !sessionStorage.getItem(marca)) { sessionStorage.setItem(marca, '1'); location.reload(); return; }
+    $('aviso-version').hidden = false;
+  }
+  function sinNadaAMedias() {
+    const foco = document.activeElement;
+    return !st.enviando && !st.enviandoBandeja && !enCurso() && !formularioConDatos() && $('resultado').hidden &&
+      !document.querySelector('.editar') && !(foco && /^(INPUT|TEXTAREA|SELECT)$/.test(foco.tagName)) &&
+      !$('u-usuario').value && !$('u-nombre').value;
+  }
+  $('btn-actualizar').addEventListener('click', async () => {
+    try { await guardarBorradorYa(); } catch (e) { /* sin almacenamiento */ }
+    location.reload();
+  });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') revisarVersion(); });
+  window.addEventListener('online', () => revisarVersion(true));
   // Enviando o con un envío a medias: el navegador pregunta antes de cerrar o recargar.
   window.addEventListener('beforeunload', ev => { if (st.enviando || enCurso()) { ev.preventDefault(); ev.returnValue = ''; } });
   // El texto del aviso de pausa cambia si se pierde o vuelve la señal.
@@ -1449,6 +1491,7 @@
       mostrarResultado(st.fines);
       $('f-reporte').hidden = true; $('resultado').hidden = false;
       window.scrollTo(0, 0);
+      setTimeout(() => revisarVersion(true), 1500);
     } catch (e) {
       toast((enCurso() ? 'Envío de ' + st.envio.id + ' en pausa: ' : 'No se pudo registrar: ') + msgError(e), true);
     } finally {
