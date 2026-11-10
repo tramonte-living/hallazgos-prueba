@@ -480,14 +480,14 @@
           <button id="a-recargar" class="btn btn-sec" type="button">Recargar configuración y resúmenes</button>
           <p id="a-fallos" class="ayuda"></p>
         </div>
-        <div class="tarjeta">
+        <div class="tarjeta" id="tm-tarjeta">
           <h2>⏱️ Tiempos de los últimos envíos</h2>
           <p class="ayuda">Cuánto tardó cada paso (en segundos) en los envíos de las últimas horas. Sirve para ver qué
             hace lenta la carga.</p>
           <div id="tm-lista" class="tiempos"></div>
           <button id="tm-ver" class="btn btn-sec" type="button">Ver tiempos</button>
         </div>
-        <div class="tarjeta">
+        <div class="tarjeta" id="rc-tarjeta">
           <h2>Renombrar categoría</h2>
           <p class="ayuda">Cambia el nombre en las listas, en los hallazgos ya registrados de todos los libros y en el Resumen.</p>
           <div class="fila2">
@@ -759,15 +759,24 @@
     actualizarZonasConsulta();
 
     if (d.ajustes) {
-      $('a-cualquier').checked = !!d.ajustes.cualquierTorre;
-      $('a-limite').value = d.ajustes.limiteMB;
-      $('a-maxev').value = d.ajustes.maxEvidencias;
-      $('a-camara').checked = !!d.ajustes.camaraTorres;
-      $('a-marca').checked = !!d.ajustes.marcaAgua;
-      $('a-marca-id').checked = d.ajustes.marcaId !== false;
+      // Ajustes, Tiempos, Renombrar categoría y Reset: solo el usuario admin (el motor también lo exige).
+      const principal = !!s.principal;
+      document.querySelector('.subtab[data-sub="ajustes"]').hidden = !principal;
+      $('tm-tarjeta').hidden = !principal;
+      $('rc-tarjeta').hidden = !principal;
+      if (principal) {
+        $('a-cualquier').checked = !!d.ajustes.cualquierTorre;
+        $('a-limite').value = d.ajustes.limiteMB;
+        $('a-maxev').value = d.ajustes.maxEvidencias;
+        $('a-camara').checked = !!d.ajustes.camaraTorres;
+        $('a-marca').checked = !!d.ajustes.marcaAgua;
+        $('a-marca-id').checked = d.ajustes.marcaId !== false;
+      }
       $('a-fallos').textContent = '🔒 Intentos de ingreso fallidos en la última hora: ' + (d.ajustes.fallosHora || 0) +
         (d.ajustes.fallosHora > 20 ? ' ⚠️ Muchos intentos: revise los usuarios bloqueados.' : '');
       opciones($('u-libro'), d.librosAdmin.map(l => ({ value: l.id, text: l.nombre })).concat([{ value: 'ADMIN', text: 'Administrador' }]));
+      // Solo el usuario admin crea administradores o da ese rol (la opción se ve al editar a un administrador).
+      $('u-libro').querySelector('option[value="ADMIN"]').disabled = !principal;
       formUsuario(null);
       opciones($('rc-anterior'), d.categorias);
       $('rc-nueva').value = '';
@@ -775,7 +784,7 @@
       const ul = $('a-enlaces'); ul.innerHTML = '';
       const link = (txt, url) => ul.appendChild(el('li', {}, [el('a', { href: url, target: '_blank', text: txt })]));
       link('📁 Carpeta de datos (auditoría)', d.enlaces.datos);
-      link('🔐 Configuración (códigos, categorías, zonas)', d.enlaces.config);
+      if (d.enlaces.config) link('🔐 Configuración (códigos, categorías, zonas)', d.enlaces.config);
       d.enlaces.libros.forEach(l => link('📊 ' + l.nombre, l.url));
       $('a-reset-tarjeta').hidden = !d.prueba;
       pintarControl(d.control);
@@ -1049,7 +1058,7 @@
   // Quien tiene la página abierta desde antes recibe la versión nueva: al volver a la pestaña, al volver la señal y
   // después de enviar, se compara la versión con la publicada (sw.js). Sin nada a medias se actualiza sola; si hay algo
   // a medias, solo avisa. La sesión no se pierde y lo que se está llenando queda guardado en el celular.
-  const VERSION = '2395ab396ab3';
+  const VERSION = '33ec9658e0c6';
   let versionRevisada = 0;
   async function revisarVersion(ya) {
     if (VERSION.indexOf('__') === 0 || navigator.onLine === false || !st.datos) return; // sin publicar (pruebas) o sin señal
@@ -1816,8 +1825,9 @@
       const accion = (txt, fn, sec) => el('button', { class: 'btn mini' + (sec ? ' btn-sec' : ''), type: 'button', text: txt, onclick: fn });
       // Acciones que llaman al servidor: indicador en el propio botón mientras responde.
       const accionEspera = (txt, espera, fn, sec) => { const b = accion(txt, () => conEspera(b, espera, fn), sec); return b; };
-      const acciones = [accion('✏️ Editar', () => formUsuario(u), true)];
-      if (u.usuario !== yo) {
+      // El usuario admin solo lo modifica él mismo (los demás administradores solo pueden desbloquearlo).
+      const acciones = u.protegido ? [] : [accion('✏️ Editar', () => formUsuario(u), true)];
+      if (u.usuario !== yo && !u.protegido) {
         acciones.push(accionEspera('🔑 Restablecer contraseña', 'Restableciendo…', () => restablecer(u)));
         acciones.push(accionEspera(u.activo ? '⛔ Desactivar' : '✅ Activar', u.activo ? 'Desactivando…' : 'Activando…', () => guardarUsuario(
           { usuario: u.usuario, libro: u.libro, nombre: u.nombre, activo: !u.activo }, false), true));
@@ -1834,7 +1844,8 @@
           el('span', { class: 'u-marcas' }, marcas.map(m => el('span', { class: 'badge ' + m[1], text: m[0] })))]),
         el('div', { class: 'u-cuerpo' }, [
           el('div', { class: 'ayuda', text: (u.nombre || '—') + (u.ultimo ? ' · último ingreso ' + u.ultimo : ' · nunca ha ingresado') }),
-          el('div', { class: 'u-acciones' }, acciones)]),
+          u.protegido ? el('div', { class: 'ayuda', text: '🔒 Solo el usuario admin puede modificar esta cuenta.' }) : null,
+          el('div', { class: 'u-acciones' }, acciones)].filter(Boolean)),
       ]);
       // Uno abierto a la vez; se mantiene abierto al recargar tras una acción.
       if (st.uAbierto === u.usuario) det.open = true;
