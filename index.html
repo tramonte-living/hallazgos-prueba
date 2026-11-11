@@ -1058,7 +1058,7 @@
   // Quien tiene la página abierta desde antes recibe la versión nueva: al volver a la pestaña, al volver la señal y
   // después de enviar, se compara la versión con la publicada (sw.js). Sin nada a medias se actualiza sola; si hay algo
   // a medias, solo avisa. La sesión no se pierde y lo que se está llenando queda guardado en el celular.
-  const VERSION = '33ec9658e0c6';
+  const VERSION = 'fe86badc86c2';
   let versionRevisada = 0;
   async function revisarVersion(ya) {
     if (VERSION.indexOf('__') === 0 || navigator.onLine === false || !st.datos) return; // sin publicar (pruebas) o sin señal
@@ -1120,7 +1120,8 @@
     if (a.file.size > MAX_SIN_PARTES) throw new Error('Supera 50 MB y la subida por partes no está disponible.');
     // Tiempo máximo según el tamaño: 2 min + 1 min por cada 3 MB (conexiones lentas).
     const ms = 120000 + Math.ceil(a.file.size / 3145728) * 60000;
-    const b64 = await leerBase64(a.file);
+    let b64;
+    try { b64 = await leerBase64(a.file); } catch (e) { throw errorArchivo(a); }
     const res = await conReintentos(() => llamar('api_subirEvidencia',
       [st.codigo, id, ticket, a.indice, a.file.name, a.file.type, b64, a.info || ''], ms),
       'Subiendo ' + (i + 1) + ' de ' + total + ' (' + mb(a.file.size) + ')…', 5 + 90 * i / total);
@@ -1142,6 +1143,21 @@
       x.ontimeout = () => mal(errorRed('Google Drive tardó demasiado en responder.'));
       x.send(cuerpo);
     });
+  }
+  /**
+   * El navegador guarda solo una referencia al archivo elegido (en el computador): si se movió, se borró o quedó solo en
+   * OneDrive, no se puede leer. Antes, Drive recibía el trozo cortado, lo rechazaba (400) y la página decía "sin conexión".
+   * Ahora el envío queda en pausa con este aviso y sin reintentos.
+   */
+  function errorArchivo(a) {
+    const e = new Error('No se pudo leer el archivo "' + a.file.name + '" (¿se movió, se borró o está solo en OneDrive?). ' +
+      'Ponlo de nuevo en su carpeta y pulsa "Reintentar envío", o "Terminar sin los archivos que faltan".');
+    e.archivo = true;
+    return e;
+  }
+  /** Lee el trozo del archivo antes de enviarlo (así Drive siempre recibe el trozo completo). */
+  async function leerTrozo(a, ini, fin) {
+    try { return await a.file.slice(ini, fin).arrayBuffer(); } catch (e) { throw errorArchivo(a); }
   }
   /** Bytes que Drive ya tiene según el encabezado Range ("bytes=0-N"), o null si no lo informa. */
   const bytesRecibidos = r => { const m = /-(\d+)$/.exec(r.rango || ''); return m ? Number(m[1]) + 1 : null; };
@@ -1178,9 +1194,10 @@
       for (;;) {
         const ini = a.enviado, fin = Math.min(ini + TROZO, tam);
         progreso(pct(ini), txt(ini));
+        const cuerpo = tam ? await leerTrozo(a, ini, fin) : null;
         let r;
         try {
-          r = await putDrive(a.sesion, tam ? a.file.slice(ini, fin) : null,
+          r = await putDrive(a.sesion, cuerpo,
             tam ? 'bytes ' + ini + '-' + (fin - 1) + '/' + tam : 'bytes */0', 180000,
             b => progreso(pct(ini + b), txt(ini + b)));
         } catch (e) {
@@ -1510,6 +1527,7 @@
           a.hecho = true; a.fallo = false; a.estado = '✓ ' + nombre;
         } catch (e) {
           if (e.red) { a.estado = '⏸ Sin subir (conexión)'; throw e; } // se reanuda con "Reintentar envío"
+          if (e.archivo) { a.estado = '⏸ No se pudo leer el archivo'; throw e; } // ídem, tras devolverlo a su carpeta
           a.pendiente = true; a.fallo = true; a.estado = '✗ No se pudo subir: ' + msgError(e);
         }
         pintarArchivos();
