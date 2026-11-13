@@ -920,8 +920,8 @@
   }
   /** Antes de subir una foto de la cámara: marca de agua (si está activa) y texto para la descripción en Drive. */
   /** Texto de la marca; el ID solo si el admin lo tiene activado (si no, la marca se puede poner antes de enviar). */
-  function lineasMarca(a, id) {
-    const c = a.captura, f = leerFormulario();
+  function lineasMarca(a, id, f) {
+    const c = a.captura; f = f || leerFormulario(); // f: datos de un reporte de la bandeja
     return [(st.datos.marcaId !== false && id ? id + ' · ' : '') + nombreLibro(f.libro) + ' · ' + f.zona + ' · ' + f.categoria,
       fechaHora(c.fecha) + ' · ' + (st.datos.sesion.usuario || ''), textoGps(c.gps)];
   }
@@ -940,12 +940,13 @@
    * tiene zona y categoría. Si después cambian, la marca se rehace. Al enviar se usa la ya preparada.
    */
   async function premarcar() {
+    if (st.preparandoBandeja) { st.premarcarLuego = true; return; } // al terminar la bandeja
     if (st.premarcando || st.enviando || !st.datos || !st.datos.marcaAgua || st.datos.marcaId !== false || enCurso()) return;
     const f = leerFormulario();
     if (!f.zona || !f.categoria) return;
     const a = st.archivos.find(x => x.captura && x.captura.fija && !x.preparada && /^image\//.test(x.file.type) &&
       !(x.marcada && x.marcada.clave === lineasMarca(x).join('|')));
-    if (!a) return;
+    if (!a) return prepararBandeja(); // el formulario ya está listo: sigue la bandeja
     st.premarcando = true;
     try { await marcaDe(a, lineasMarca(a)); } catch (e) { /* se reintenta al enviar */ }
     st.premarcando = false;
@@ -1018,6 +1019,25 @@
   // ya existe y "Reintentar" solo sube lo que falta (el permiso de carga dura 12 h).
   const ESPERAS = [3, 10, 30]; // segundos entre reintentos ante fallas de red
   const ESPERA_SENAL_MAX = 5 * 60000;
+  const ESPERA_ANTES_DE_OFRECER = 5; // s de cuenta antes de ofrecer "Reintentar ahora"
+  /** Espera ms o hasta que se toque "Reintentar ahora" (st.saltarEspera); resuelve true si se tocó. */
+  function esperarOSaltar(ms) {
+    return new Promise(ok => {
+      const t = setTimeout(() => { st.saltarEspera = null; ok(false); }, ms);
+      st.saltarEspera = () => { clearTimeout(t); st.saltarEspera = null; ok(true); };
+    });
+  }
+  /** Durante la cuenta del reintento, el botón de envío se activa para no esperar. */
+  function ofrecerReintento(sg) {
+    if (!st.enviando) return;
+    const btn = $('btn-enviar');
+    btn.disabled = false; btn.classList.remove('ocupado');
+    btn.textContent = '🔁 Reintentar ahora (quedan ' + sg + ' s)';
+  }
+  function quitarReintento() {
+    st.saltarEspera = null;
+    if (st.enviando) { const btn = $('btn-enviar'); btn.disabled = true; btn.classList.add('ocupado'); }
+  }
   const enCurso = () => !!(st.envio && st.envio.id);
   const esperar = ms => new Promise(r => setTimeout(r, ms));
   function claveAleatoria() {
@@ -1041,7 +1061,13 @@
       try { return await fn(); }
       catch (e) {
         if (!e.red || i >= ESPERAS.length) throw e;
-        for (let sg = ESPERAS[i]; sg > 0; sg--) { progreso(pct, 'Conexión inestable. Reintentando en ' + sg + ' s…'); await esperar(1000); }
+        try {
+          for (let sg = ESPERAS[i]; sg > 0; sg--) {
+            progreso(pct, 'Conexión inestable. Reintentando en ' + sg + ' s…');
+            if (ESPERAS[i] - sg >= ESPERA_ANTES_DE_OFRECER) ofrecerReintento(sg);
+            if (await esperarOSaltar(1000)) break; // tocó "Reintentar ahora"
+          }
+        } finally { quitarReintento(); }
       }
     }
   }
@@ -1058,7 +1084,7 @@
   // Quien tiene la página abierta desde antes recibe la versión nueva: al volver a la pestaña, al volver la señal y
   // después de enviar, se compara la versión con la publicada (sw.js). Sin nada a medias se actualiza sola; si hay algo
   // a medias, solo avisa. La sesión no se pierde y lo que se está llenando queda guardado en el celular.
-  const VERSION = 'fe86badc86c2';
+  const VERSION = 'c41068b3d17c';
   let versionRevisada = 0;
   async function revisarVersion(ya) {
     if (VERSION.indexOf('__') === 0 || navigator.onLine === false || !st.datos) return; // sin publicar (pruebas) o sin señal
@@ -1285,12 +1311,16 @@
     const clave = claveBorrador();
     const nuevos = st.archivos.filter(a => !a.fid || a.fidDe !== a.file);
     nuevos.forEach(a => { a.fid = claveAleatoria(); a.fidDe = a.file; });
+    // Foto de la cámara con la marca de agua ya hecha (se guarda aparte del original: si cambian zona o categoría se rehace).
+    const conMarca = a => !!(a.marcada && !a.preparada);
+    const marcas = st.archivos.filter(a => conMarca(a) && (!a.fidM || a.fidMDe !== a.marcada.file));
+    marcas.forEach(a => { a.fidM = claveAleatoria(); a.fidMDe = a.marcada.file; });
     const rec = {
       clave, usuarioId: st.datos.sesion.usuarioId, enCola: !!st.actualEnCola, creado: st.actualCreado || Date.now(),
       guardado: Date.now(), datos: leerFormulario(), envio: st.envio ? Object.assign({}, st.envio) : null,
-      fids: st.archivos.map(a => a.fid),
+      fids: st.archivos.map(a => a.fid).concat(st.archivos.filter(conMarca).map(a => a.fidM)),
       archivos: st.archivos.map(a => ({
-        fid: a.fid, nombre: a.file.name, tipo: a.file.type, tam: a.file.size,
+        fid: a.fid, fidM: conMarca(a) ? a.fidM : null, marcaClave: conMarca(a) ? a.marcada.clave : '', nombre: a.file.name, tipo: a.file.type, tam: a.file.size,
         captura: a.captura ? Object.assign({}, a.captura, { fecha: +a.captura.fecha }) : null,
         indice: a.indice, hecho: !!a.hecho, pendiente: !!a.pendiente, fallo: !!a.fallo, estado: a.estado || '',
         sesion: a.sesion || null, enviado: a.enviado || 0, nombreFinal: a.nombreFinal || '', info: a.info || '',
@@ -1301,6 +1331,7 @@
     try {
       await bdTx(['reportes', 'archivos'], 'readwrite', (r, ar) => {
         nuevos.forEach(a => ar.put({ fid: a.fid, blob: a.file }));
+        marcas.forEach(a => ar.put({ fid: a.fidM, blob: a.marcada.file }));
         const previo = r.get(clave);
         previo.onsuccess = () => {
           (previo.result && previo.result.fids || []).filter(f => rec.fids.indexOf(f) < 0).forEach(f => ar.delete(f));
@@ -1309,7 +1340,7 @@
         return previo;
       });
     } catch (e) {
-      nuevos.forEach(a => { a.fid = null; }); // se reintenta en el próximo guardado
+      nuevos.forEach(a => { a.fid = null; }); marcas.forEach(a => { a.fidM = null; }); // se reintenta en el próximo guardado
       if (!st.avisoSinEspacio) { st.avisoSinEspacio = true; toast('⚠️ No se pudo guardar una copia en el celular (' + msgError(e) + ').', true); }
     }
   }
@@ -1324,7 +1355,9 @@
     // Solo las fotos de este reporte (leerlas todas de la bandeja es lento y gasta memoria con varios pendientes).
     const porFid = {};
     await bdTx(['archivos'], 'readonly', a => {
-      (rec.archivos || []).forEach(x => { const q = a.get(x.fid); q.onsuccess = () => { if (q.result) porFid[x.fid] = q.result.blob; }; });
+      (rec.archivos || []).forEach(x => [x.fid, x.fidM].filter(Boolean).forEach(f => {
+        const q = a.get(f); q.onsuccess = () => { if (q.result) porFid[f] = q.result.blob; };
+      }));
     });
     st.archivos.forEach(a => a.url && URL.revokeObjectURL(a.url));
     const d = rec.datos || {};
@@ -1335,7 +1368,10 @@
     st.archivos = rec.archivos.filter(x => porFid[x.fid]).map(x => {
       const b = porFid[x.fid];
       const file = b instanceof File && b.name ? b : new File([b], x.nombre, { type: x.tipo });
-      return Object.assign({}, x, { file, fidDe: file, url: /^image\//.test(x.tipo) ? URL.createObjectURL(file) : null,
+      const bm = x.fidM && porFid[x.fidM];
+      const marcada = bm ? { clave: x.marcaClave, file: bm instanceof File && bm.name ? bm
+        : new File([bm], x.nombre.replace(/\.[^.]*$/, '') + '.jpg', { type: 'image/jpeg' }) } : null;
+      return Object.assign({}, x, { file, fidDe: file, marcada, fidM: marcada ? x.fidM : null, fidMDe: marcada && marcada.file, url: /^image\//.test(x.tipo) ? URL.createObjectURL(file) : null,
         verificar: !!(x.sesion && !x.hecho), // subida a medias: se pregunta a Drive cuánto recibió
         captura: x.captura ? Object.assign({}, x.captura, { fecha: new Date(x.captura.fecha), fija: true }) : null });
     });
@@ -1381,9 +1417,11 @@
         el('div', { class: 'mini', text: n ? '📷' : '📝' }),
         el('div', { class: 'info' }, [
           el('div', { class: 'nombre', text: (d.zona || '¿zona?') + ' · ' + (d.categoria || '¿categoría?') + (r.envio && r.envio.id ? ' · ' + r.envio.id : '') }),
-          el('div', { class: 'estado-sub', text: n + ' archivo(s) · guardado ' + fechaHora(new Date(r.creado)) +
+          el('div', { class: 'estado-sub', text: n + ' archivo(s)' + textoMarcasBandeja(r) + ' · guardado ' + fechaHora(new Date(r.creado)) +
             (d.descripcion ? ' · ' + d.descripcion.slice(0, 60) : '') }),
         ]),
+        r.envio ? null : el('button', { class: 'quitar', type: 'button', title: 'Editar', text: '✏️',
+          onclick: () => editarPendiente(r.clave) }),
         el('button', { class: 'quitar', type: 'button', title: 'Eliminar', text: '🗑️', onclick: async () => {
           if (!confirm('¿Eliminar este reporte pendiente del celular? ' + (r.envio && r.envio.id
             ? 'El hallazgo ' + r.envio.id + ' ya está registrado como "Incompleto".' : 'No se enviará.'))) return;
@@ -1392,6 +1430,81 @@
       ]));
     });
     if (volvioSenal) toast('📶 Volvió la señal: tienes ' + cola.length + ' reporte(s) pendiente(s). Pulsa "📤 Enviar ahora".');
+    prepararBandeja();
+  }
+
+  // Fotos de la cámara en la bandeja: la marca de agua (sin ID) se hace en segundo plano, una foto a la vez, apenas se
+  // guarda el reporte; al enviarlo solo se suben. Con el ID en la marca no se puede (el ID se conoce al registrar).
+  const marcaSinId = () => !!(st.datos && st.datos.marcaAgua && st.datos.marcaId === false);
+  const fotoDeCamara = x => !!(x.captura && /^image\//.test(x.tipo) && !x.preparada && !x.hecho && !x.pendiente);
+  const claveMarcaGuardada = (r, x) => lineasMarca({ captura: Object.assign({}, x.captura, { fecha: new Date(x.captura.fecha) }) },
+    null, r.datos || {}).join('|');
+  const marcaLista = (r, x) => !!(x.fidM && x.marcaClave === claveMarcaGuardada(r, x));
+  function textoMarcasBandeja(r) {
+    if (!marcaSinId() || r.envio) return '';
+    const fotos = r.archivos.filter(fotoDeCamara);
+    if (!fotos.length) return '';
+    const listas = fotos.filter(x => marcaLista(r, x)).length;
+    return listas === fotos.length ? ' · ✓ fotos listas' : ' · preparando fotos (' + listas + ' de ' + fotos.length + ')';
+  }
+  async function prepararBandeja() {
+    if (st.preparandoBandeja || !marcaSinId()) return;
+    st.preparandoBandeja = true;
+    let hizo = false;
+    try {
+      for (;;) {
+        if (st.enviando || st.premarcando) break; // no dos fotos a la vez en el canvas (memoria del celular)
+        const cola = (await misReportes()).filter(r => r.enCola && !r.envio && r.clave !== st.actual).sort((a, b) => a.creado - b.creado);
+        let r = null, x = null;
+        for (const c of cola) { x = c.archivos.find(y => fotoDeCamara(y) && !marcaLista(c, y)); if (x) { r = c; break; } }
+        if (!r) break;
+        const clave = claveMarcaGuardada(r, x);
+        const blob = await bdTx(['archivos'], 'readonly', a => a.get(x.fid)).then(v => v && v.blob).catch(() => null);
+        if (!blob) break;
+        let marcada;
+        try {
+          marcada = await marcarFoto(blob instanceof File && blob.name ? blob : new File([blob], x.nombre, { type: x.tipo }),
+            lineasMarca({ captura: Object.assign({}, x.captura, { fecha: new Date(x.captura.fecha) }) }, null, r.datos || {}));
+        } catch (e) { break; } // se rehace al enviar
+        const fidM = claveAleatoria();
+        // Se vuelve a leer el reporte: si mientras tanto se editó, se envió o se borró, la marca se descarta.
+        await bdTx(['reportes', 'archivos'], 'readwrite', (rs, ar) => {
+          const q = rs.get(r.clave);
+          q.onsuccess = () => {
+            const cur = q.result, y = cur && cur.enCola && !cur.envio && cur.clave !== st.actual && cur.archivos.find(z => z.fid === x.fid);
+            if (!y || claveMarcaGuardada(cur, y) !== clave) return;
+            if (y.fidM) { ar.delete(y.fidM); cur.fids = cur.fids.filter(f => f !== y.fidM); }
+            ar.put({ fid: fidM, blob: marcada });
+            y.fidM = fidM; y.marcaClave = clave; cur.fids.push(fidM);
+            rs.put(cur);
+          };
+          return q;
+        }).catch(() => {});
+        hizo = true;
+      }
+    } finally { st.preparandoBandeja = false; }
+    if (hizo) pintarBandeja();
+    if (st.premarcarLuego) { st.premarcarLuego = false; premarcar(); }
+  }
+
+  /** Vuelve al formulario un reporte de la bandeja (aún sin registrar) para completarlo o corregirlo. */
+  async function editarPendiente(clave) {
+    if (st.enviando || st.enviandoBandeja) return;
+    const rec = (await misReportes()).find(r => r.clave === clave);
+    if (!rec || rec.envio) return toast('Ese reporte ya no se puede editar.', true);
+    if (formularioConDatos() && $('resultado').hidden) {
+      if (!confirm('Tienes otro reporte en el formulario: se guardará en pendientes para no perderlo. ¿Continuar?')) return;
+      st.actualEnCola = true; await guardarBorradorYa();
+    }
+    reiniciarFormulario();
+    $('resultado').hidden = true; $('res-manual').hidden = true; $('f-reporte').hidden = false;
+    await cargarEnFormulario(rec);
+    st.actualEnCola = false; // sale de la bandeja: queda como el reporte que se está llenando
+    await guardarBorradorYa();
+    await pintarBandeja();
+    premarcar();
+    $('f-reporte').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    toast('✏️ Editando el reporte pendiente. Al terminar: "Enviar reporte" o "Guardar para enviar después".');
   }
   $('btn-enviar-pend').addEventListener('click', enviarPendientes);
   async function enviarPendientes() {
@@ -1471,7 +1584,7 @@
   }
   $('f-reporte').addEventListener('submit', ev => {
     ev.preventDefault();
-    if (st.enviando) return;
+    if (st.enviando) { if (st.saltarEspera) st.saltarEspera(); return; } // "Reintentar ahora"
     if (!enCurso() && !formularioValido('Enviar')) return;
     // Sin señal: en vez de esperar, se guarda en la bandeja.
     if (navigator.onLine === false && !st.enviandoBandeja) return guardarParaDespues(true);
@@ -1554,6 +1667,7 @@
       if (enCurso()) $('envio-pendiente').scrollIntoView({ behavior: 'smooth', block: 'center' });
       setTimeout(() => { $('progreso').hidden = true; }, 800);
       if (!exito) guardarBorradorYa();
+      if (!st.enviandoBandeja) setTimeout(prepararBandeja, 1000);
     }
     return exito;
   }
