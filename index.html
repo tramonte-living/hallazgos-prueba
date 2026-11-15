@@ -45,6 +45,8 @@
     .c-fila { display: flex; gap: 8px; }
     .c-fila input { flex: 1; min-width: 0; }
     .c-fila select { width: auto; flex: none; }
+    .c-check { display: flex; align-items: center; gap: 6px; font-size: .9rem; margin: 6px 0 0; cursor: pointer; }
+    .c-check input { width: auto; margin: 0; }
     .fila2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     @media (max-width: 480px) { .fila2 { grid-template-columns: 1fr; } }
     input[type=text], input[type=password], input[type=search], input[type=number], input[type=date], select, textarea {
@@ -361,6 +363,7 @@
               <option value="20">Últimos 20</option><option value="30">Últimos 30</option><option value="5000">Todos</option>
             </select>
           </div>
+          <label class="c-check"><input id="c-incompletos" type="checkbox"> Solo los <b>Incompletos</b> (les faltan fotos)</label>
           <p id="c-total" class="ayuda"></p>
           <div id="c-ver-todo" hidden>
             <p class="ver-todo-tit"><b>Ver todo el libro</b> <span class="ayuda">(solo lectura, no se puede modificar)</span></p>
@@ -724,7 +727,7 @@
     ['reportar', 'consultar', 'admin'].forEach(t => { $('t-' + t).hidden = t !== 'reportar'; });
     ['c-lista', 'c-enlaces', 'ctl-info', 'u-lista', 'a-enlaces', 'u-temporal', 'lista-archivos', 'e-libro', 'e-filas', 'e-resumen', 'e-info', 'tm-lista'].forEach(id => { $(id).innerHTML = ''; });
     $('u-temporal').hidden = true; $('a-reset-tarjeta').hidden = true; st.estad = null; verSubpanel('estadisticas');
-    $('c-total').textContent = ''; $('c-buscar').value = '';
+    $('c-total').textContent = ''; $('c-buscar').value = ''; $('c-incompletos').checked = false;
     $('u-buscar').value = ''; $('u-filtro').innerHTML = ''; $('u-total').textContent = ''; st.usuarios = null; st.uAbierto = null; st.uGrupos = {};
     st.lista = []; st.archivos = []; st.envio = null; st.actual = null; st.actualEnCola = false; st.actualCreado = null; st.sinBorrador = false;
     $('bandeja').hidden = true; $('bandeja-lista').innerHTML = '';
@@ -818,7 +821,11 @@
   $('f-reporte').addEventListener('input', () => guardarBorrador());
   $('f-reporte').addEventListener('change', () => { guardarBorrador(); premarcar(); });
 
-  const maxEvidencias = () => st.datos.maxEvidencias || 5;
+  /** Completando fotos: las que faltaban más las que caben hasta el máximo (contando las que ya están en Drive). */
+  const maxEvidencias = () => {
+    const c = st.envio && st.envio.completar;
+    return c ? c.faltan.length + Math.max(0, (c.max || 5) - c.usados.length - c.faltan.length) : st.datos.maxEvidencias || 5;
+  };
   function agregarArchivos(files, captura) {
     const cupo = maxEvidencias() - st.archivos.length;
     if (files.length > cupo) toast('Máximo ' + maxEvidencias() + ' fotos o videos por hallazgo' +
@@ -981,7 +988,8 @@
     const limite = st.datos.limiteMB * 1048576, max = maxEvidencias(), lleno = st.archivos.length >= max;
     $('max-ev').textContent = max;
     $('ev-contador').textContent = st.archivos.length ? '(' + st.archivos.length + ' de ' + max + ')' : '';
-    document.querySelectorAll('.botones-ev .subir').forEach(b => b.classList.toggle('desactivado', lleno || enCurso()));
+    const abiertos = !enCurso() || completando(); // se pueden agregar o quitar archivos
+    document.querySelectorAll('.botones-ev .subir').forEach(b => b.classList.toggle('desactivado', lleno || !abiertos));
     st.archivos.forEach((a, i) => {
       const tipoOk = /^(image|video)\//.test(a.file.type);
       a.malo = !tipoOk;
@@ -998,7 +1006,7 @@
           el('div', { class: 'nombre', title: a.file.name, text: (i + 1) + '. ' + (a.captura ? '📷 Foto tomada con la app' : a.file.name) }),
           el('div', { class: 'estado-sub', text: nota }),
         ]),
-        enCurso() ? null : el('button', { class: 'quitar', type: 'button', title: 'Quitar', text: '✕', onclick: () => {
+        !abiertos ? null : el('button', { class: 'quitar', type: 'button', title: 'Quitar', text: '✕', onclick: () => {
           if (a.url) URL.revokeObjectURL(a.url);
           st.archivos.splice(i, 1); pintarArchivos();
         } }),
@@ -1084,7 +1092,7 @@
   // Quien tiene la página abierta desde antes recibe la versión nueva: al volver a la pestaña, al volver la señal y
   // después de enviar, se compara la versión con la publicada (sw.js). Sin nada a medias se actualiza sola; si hay algo
   // a medias, solo avisa. La sesión no se pierde y lo que se está llenando queda guardado en el celular.
-  const VERSION = 'c41068b3d17c';
+  const VERSION = 'a9300596bc09';
   let versionRevisada = 0;
   async function revisarVersion(ya) {
     if (VERSION.indexOf('__') === 0 || navigator.onLine === false || !st.datos) return; // sin publicar (pruebas) o sin señal
@@ -1541,15 +1549,25 @@
 
   /** Hallazgo ya registrado con archivos por subir: bloquea el formulario y muestra cómo seguir. */
   function pintarEnvio() {
-    const ec = enCurso();
-    $('f-reporte').querySelectorAll('select, input, textarea').forEach(x => { x.disabled = ec; });
+    const ec = enCurso(), comp = completando();
+    $('f-reporte').querySelectorAll('select, input, textarea').forEach(x => { x.disabled = ec && !(comp && x.type === 'file'); });
     // El aviso solo aparece si el envío quedó en pausa (no mientras se está subiendo).
     const pausa = ec && !st.enviando;
     $('btn-guardar-despues').hidden = st.enviando || !st.datos;
     textoGuardarDespues();
     $('envio-pendiente').hidden = !pausa;
-    if (!st.enviando) $('btn-enviar').textContent = pausa ? '🔁 Reintentar envío de ' + st.envio.id : 'Enviar reporte';
-    if (pausa) {
+    if (!st.enviando) $('btn-enviar').textContent = comp ? '📤 Subir fotos a ' + st.envio.id
+      : pausa ? '🔁 Reintentar envío de ' + st.envio.id : 'Enviar reporte';
+    $('btn-descartar-envio').textContent = comp ? 'Cancelar' : 'Descartar';
+    if (comp) {
+      const c = st.envio.completar, cupo = maxEvidencias();
+      $('envio-pendiente-txt').textContent = '📤 Completar fotos de ' + st.envio.id + '. ' +
+        (c.faltan.length ? 'Faltan: ' + c.faltan.map(x => x.nombre).join(', ') + '.'
+          : 'No quedó la lista de las fotos que faltaban: agrega las que tengas.') +
+        (cupo ? ' Puedes agregar hasta ' + cupo + '. Luego pulsa "Subir fotos".'
+          : ' Este hallazgo ya tiene el máximo de fotos.');
+      $('btn-terminar').hidden = true;
+    } else if (pausa) {
       const faltan = st.archivos.filter(a => !a.hecho && !a.pendiente).length;
       const resta = faltan ? 'faltan ' + faltan + ' archivo(s) por subir.' : 'falta terminar el envío.';
       $('envio-pendiente-txt').textContent = navigator.onLine === false
@@ -1586,6 +1604,11 @@
     ev.preventDefault();
     if (st.enviando) { if (st.saltarEspera) st.saltarEspera(); return; } // "Reintentar ahora"
     if (!enCurso() && !formularioValido('Enviar')) return;
+    if (completando()) {
+      if (!st.archivos.length) return toast('Agrega las fotos o videos que faltan.', true);
+      if (st.archivos.some(a => a.malo)) return toast('Quite los archivos marcados en rojo (solo fotos o videos).', true);
+      if (st.archivos.length > maxEvidencias()) return toast('Máximo ' + maxEvidencias() + ': quite ' + (st.archivos.length - maxEvidencias()) + '.', true);
+    }
     // Sin señal: en vez de esperar, se guarda en la bandeja.
     if (navigator.onLine === false && !st.enviandoBandeja) return guardarParaDespues(true);
     enviar();
@@ -1603,10 +1626,27 @@
   });
   $('btn-descartar-envio').addEventListener('click', () => {
     if (st.enviando || !enCurso()) return;
-    if (!confirm('¿Descartar este envío? El hallazgo ' + st.envio.id + ' queda registrado como "Incompleto" y las fotos que ' +
-      'falten deberá entregarlas al administrador.')) return;
+    if (!confirm(st.envio.completar
+      ? '¿Cancelar? El hallazgo ' + st.envio.id + ' sigue "Incompleto" (puedes completarlo después desde Consultar).'
+      : '¿Descartar este envío? El hallazgo ' + st.envio.id + ' queda registrado como "Incompleto" y las fotos que ' +
+        'falten deberá entregarlas al administrador.')) return;
     reiniciarFormulario({ borrar: true });
   });
+
+  /**
+   * El permiso de carga dura 12 h. Si venció (p. ej. se reintenta al día siguiente), se pide otro al motor (solo autor,
+   * Editor o admin, y solo si el hallazgo sigue Incompleto) y se repite la acción una vez.
+   */
+  const ticketVencido = e => /permiso de carga .* no es válido o venció/.test(msgError(e));
+  async function conTicket(fn) {
+    try { return await fn(); }
+    catch (e) {
+      if (!ticketVencido(e) || !enCurso()) throw e;
+      const r = await conReintentos(() => api('api_renovarCarga', st.codigo, st.envio.id), 'Renovando el permiso de carga…', 50);
+      st.envio.ticket = r.ticket; guardarBorradorYa();
+      return fn();
+    }
+  }
 
   /** Envía el reporte del formulario. Devuelve true si terminó (registrado y finalizado). */
   async function enviar() {
@@ -1630,13 +1670,23 @@
         usarPermisos(r.subidas, datos.subidas);
         pintarEnvio(); guardarBorradorYa();
       }
-      const id = st.envio.id, ticket = st.envio.ticket, lista = st.archivos;
+      const comp = st.envio.completar;
+      if (comp && !comp.iniciado) {
+        // Completar fotos: primero ocupan los números que quedaron pendientes; las demás, el siguiente número libre.
+        const libres = comp.faltan.map(x => x.indice).sort((a, b) => a - b);
+        let sig = Math.max(0, ...comp.usados, ...libres) + 1;
+        st.archivos.forEach(a => { a.indice = libres.length ? libres.shift() : sig++; });
+        comp.iniciado = true;
+        st.medidas = { registrar: 0, preparar: 0, permisos: 0, subir: 0 };
+        pintarEnvio(); guardarBorradorYa();
+      }
+      const id = st.envio.id, lista = st.archivos;
       for (let i = 0; i < lista.length; i++) {
         const a = lista[i];
         if (a.hecho || a.pendiente) continue;
         if (a.manual) { a.pendiente = true; a.estado = '⏳ Entrega manual (supera ' + st.datos.limiteMB + ' MB)'; pintarArchivos(); continue; }
         try {
-          const nombre = await subirArchivo(a, id, ticket, i, lista.length);
+          const nombre = await conTicket(() => subirArchivo(a, id, st.envio.ticket, i, lista.length));
           a.hecho = true; a.fallo = false; a.estado = '✓ ' + nombre;
         } catch (e) {
           if (e.red) { a.estado = '⏸ Sin subir (conexión)'; throw e; } // se reanuda con "Reintentar envío"
@@ -1647,7 +1697,17 @@
       }
       const pendientes = lista.filter(a => a.pendiente).map(a => ({ indice: a.indice, original: a.file.name, mime: a.file.type }));
       const subidos = lista.filter(a => a.hecho && a.fileId).map(a => ({ indice: a.indice, fileId: a.fileId }));
-      const fin = await conReintentos(() => api('api_finalizarHallazgo', st.codigo, id, ticket, pendientes, subidos, st.medidas || {}), 'Finalizando…', 97);
+      let fin;
+      if (comp) {
+        // Sin lista de faltantes no se sabe cuántas eran: quien sube confirma (una vez) si ya están todas.
+        if (comp.completo == null) comp.completo = comp.faltan.length ? false : !pendientes.length &&
+          confirm('¿Ya están todas las fotos de ' + id + '?\n\nAceptar: pasa a "Pendiente de revisión".\n' +
+            'Cancelar: sigue "Incompleto" y puedes agregar más después.');
+        fin = await conTicket(() => conReintentos(() => api('api_completarCarga', st.codigo, id, st.envio.ticket, comp.completo), 'Actualizando el Excel…', 97));
+        fin.completar = true;
+      } else {
+        fin = await conTicket(() => conReintentos(() => api('api_finalizarHallazgo', st.codigo, id, st.envio.ticket, pendientes, subidos, st.medidas || {}), 'Finalizando…', 97));
+      }
       progreso(100, 'Listo');
       st.envio = null; gpsApagar(); exito = true;
       borradorEnviado();
@@ -1712,7 +1772,9 @@
       varios ? el('span', { class: 'ayuda', text: ' · ' + f.evidencias + ' evid.' }) : ''])));
     $('res-detalle').textContent = varios
       ? fines.reduce((s, f) => s + f.evidencias, 0) + ' evidencia(s) guardada(s) en total.'
+      : fines[0].completar ? fines[0].nuevos + ' foto(s) o video(s) agregados · ' + fines[0].evidencias + ' en total · Estado: ' + fines[0].estado
       : fines[0].evidencias + ' evidencia(s) guardada(s).';
+    if (!varios && fines[0].completar) $('res-titulo').textContent = 'Fotos completadas';
     $('res-manual').innerHTML = '';
     $('res-manual').hidden = !fines.some(f => f.pendientes.length);
     fines.forEach(mostrarManual);
@@ -1765,6 +1827,7 @@
   $('c-mostrar').addEventListener('change', () => { localStorage.setItem(LS_MOSTRAR, $('c-mostrar').value); cargarLista(); });
   $('c-libro').addEventListener('change', () => { actualizarZonasConsulta(); cargarLista(); });
   $('c-zona').addEventListener('change', () => cargarLista());
+  $('c-incompletos').addEventListener('change', () => cargarLista());
   $('c-buscar').addEventListener('input', () => {
     clearTimeout(cargarLista._t); cargarLista._t = setTimeout(() => cargarLista(), 600);
   });
@@ -1777,7 +1840,7 @@
     $('c-total').textContent = 'Cargando…';
     try {
       const r = await api('api_listar', st.codigo, $('c-libro').value,
-        { limite: st.limite, zona: $('c-zona').value, q: $('c-buscar').value.trim() });
+        { limite: st.limite, zona: $('c-zona').value, q: $('c-buscar').value.trim(), incompletos: $('c-incompletos').checked });
       if (pedido !== cargarLista._n) return;
       st.lista = r.items; st.totalLista = r.total;
       pintarLista();
@@ -1793,8 +1856,9 @@
 
   function pintarLista() {
     const libro = $('c-libro').value, items = st.lista, total = st.totalLista || 0;
-    const filtro = $('c-zona').value || $('c-buscar').value.trim();
-    $('c-total').textContent = !total ? (filtro ? 'Ningún hallazgo coincide.' : 'Aún no hay hallazgos en este libro.')
+    const filtro = $('c-zona').value || $('c-buscar').value.trim() || $('c-incompletos').checked;
+    $('c-total').textContent = !total ? ($('c-incompletos').checked && !$('c-zona').value && !$('c-buscar').value.trim()
+      ? '✓ No hay hallazgos Incompletos en este libro.' : filtro ? 'Ningún hallazgo coincide.' : 'Aún no hay hallazgos en este libro.')
       : (items.length < total ? 'Mostrando los ' + items.length + ' más recientes de ' : 'Mostrando todos: ') +
         total + (filtro ? ' coincidencia(s).' : ' hallazgo(s).');
     const cont = $('c-lista'); cont.innerHTML = '';
@@ -1817,6 +1881,8 @@
         galeria,
         (h.pendientes || []).length ? el('div', { class: 'pend', text: '⏳ Pendiente carga manual: ' + h.pendientes.join(', ') }) : null,
       ]);
+      if (h.completable) tarjeta.appendChild(el('button', { class: 'btn mini', type: 'button', text: '📤 Completar fotos',
+        onclick: ev => conEspera(ev.currentTarget, 'Abriendo…', () => completarFotos(h)) }));
       if (h.editable) tarjeta.appendChild(el('button', { class: 'btn btn-sec mini', type: 'button', text: '✏️ Editar',
         onclick: ev => { ev.currentTarget.replaceWith(formEdicion(h)); } }));
       if (admin) tarjeta.appendChild(controlRevision(h));
@@ -1842,6 +1908,36 @@
       } catch (e) { ph.textContent = '⚠️'; ph.title = msgError(e); }
     }
   }
+
+  /**
+   * Hallazgo Incompleto: lo abre en Reportar para subirle las fotos que faltan (el formulario queda bloqueado con sus
+   * datos; solo se agregan fotos). El motor da un permiso de carga nuevo y dice qué números faltan y cuáles ya están.
+   */
+  async function completarFotos(h) {
+    if (st.enviando || st.enviandoBandeja) return toast('Espera a que termine el envío en curso.', true);
+    if (enCurso() && st.envio.id === h.id) { document.querySelector('.tab[data-tab="reportar"]').click(); return; }
+    if (formularioConDatos() && $('resultado').hidden) {
+      if (!confirm('Tienes otro reporte en el formulario: se guardará en pendientes para no perderlo. ¿Continuar?')) return;
+      st.actualEnCola = true; await guardarBorradorYa();
+    }
+    let r;
+    try { r = await api('api_renovarCarga', st.codigo, h.id); } catch (e) { return toast(msgError(e), true); }
+    reiniciarFormulario();
+    $('resultado').hidden = true; $('res-manual').hidden = true; $('f-reporte').hidden = false;
+    $('sel-libro').value = h.id.split('-')[0]; actualizarZonas();
+    $('sel-zona').value = h.zona || ''; $('sel-categoria').value = h.categoria || '';
+    $('in-ubicacion').value = h.ubicacion || ''; $('in-descripcion').value = h.descripcion || ''; $('in-reporta').value = h.reportadoPor || '';
+    const f = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(h.fecha || '');
+    if (f) $('in-fecha').value = f[3] + '-' + f[2] + '-' + f[1];
+    st.envio = { clave: claveBorrador(), id: h.id, ticket: r.ticket,
+      completar: { faltan: r.faltan || [], usados: r.usados || [], max: r.maxEvidencias || maxEvidencias() } };
+    pintarEnvio(); guardarBorradorYa();
+    document.querySelector('.tab[data-tab="reportar"]').click();
+    window.scrollTo(0, 0);
+    toast('📤 Agrega las fotos que faltan de ' + h.id + ' y pulsa "Subir fotos".');
+  }
+  /** Modo "completar fotos" antes de empezar a subir: se pueden agregar y quitar archivos. */
+  const completando = () => !!(st.envio && st.envio.completar && !st.envio.completar.iniciado);
 
   /** Corrige ubicación y descripción de un hallazgo (el motor valida el permiso y guarda el historial). */
   function formEdicion(h) {
