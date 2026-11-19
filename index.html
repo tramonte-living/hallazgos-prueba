@@ -1092,7 +1092,7 @@
   // Quien tiene la página abierta desde antes recibe la versión nueva: al volver a la pestaña, al volver la señal y
   // después de enviar, se compara la versión con la publicada (sw.js). Sin nada a medias se actualiza sola; si hay algo
   // a medias, solo avisa. La sesión no se pierde y lo que se está llenando queda guardado en el celular.
-  const VERSION = '35d84338cf37';
+  const VERSION = '7545112d5804';
   let versionRevisada = 0;
   async function revisarVersion(ya) {
     if (VERSION.indexOf('__') === 0 || navigator.onLine === false || !st.datos) return; // sin publicar (pruebas) o sin señal
@@ -2231,7 +2231,15 @@
     } catch (e) { toast(msgError(e), true); }
   }));
   $('a-recargar').addEventListener('click', ev => conEspera(ev.currentTarget, 'Recargando…', async () => {
-    try { await api('api_recargarConfig', st.codigo); toast('Configuración recargada'); iniciar(st.codigo); cargarEstadisticas(); }
+    try {
+      const r = await api('api_recargarConfig', st.codigo);
+      // r: {libros, disparadores, protegidos, errores} (edición a mano en el Excel); motor anterior: true
+      const ex = r && r.libros ? ' · Edición en Excel: ' + r.protegidos + ' de ' + r.libros + ' libros protegidos, ' +
+        r.disparadores + ' de ' + r.libros + ' con fechas automáticas' : '';
+      const mal = r && r.errores && r.errores.length;
+      toast('Configuración recargada' + ex + (mal ? ' · ⚠ ' + r.errores.join(' · ') : ''), !!mal);
+      iniciar(st.codigo); cargarEstadisticas();
+    }
     catch (e) { toast(msgError(e), true); }
   }));
 
